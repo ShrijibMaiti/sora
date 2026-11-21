@@ -1,0 +1,28 @@
+[project]
+name = "sora"
+version = "0.1.0"
+description = "Sora — Urban Personal Exposure Digital Twin"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=2",
+  "pandas>=2.2",
+  "scikit-learn>=1.4",
+  "networkx>=3.2",
+  "httpx>=0.27",
+  "fastapi>=0.110",
+  "uvicorn>=0.29",
+]
+
+[project.optional-dependencies]
+operator = ["torch>=2.2"]
+dev = ["pytest>=8"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["sora*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

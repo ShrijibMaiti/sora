@@ -1,0 +1,7 @@
+data_cache/
+__pycache__/
+.pytest_cache/
+*.egg-info/
+*.pt
+web/node_modules/
+web/dist/
