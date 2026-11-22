@@ -42,6 +42,8 @@ Geist (UI) + Geist Mono (ranges, times, codes). Tabular numerals on every figure
 | h3 / h4 | 20 / 500 / 1.3 · 16 / 500 / 1.35 |
 | body / small / label | 15–16 / 400 / 1.55 · 13 / 400 / 1.45 · 12 / 500 / 1.3 |
 | numeric | 26–56 / 300, ranges in mono 12 `(121–180)` |
+
+Components use the `--fs-*` scale in tokens.css, never raw px: nano 10 · micro 11 · label 12 · small 13 · ui 14 · body 15 · h4 16 · lead 17 · lede 18 · h3 20 · h3-lg 22 · num-md 34 · num-lg 36 · num-2xl 44 · num-3xl 56 (plus the clamp() display/h1/h2 sizes). Colours likewise come from tokens; the Leaflet canvas resolves `--aqi-*` / `--unc-*` with getComputedStyle per theme.
 Mono uppercase labels: 12px, letter-spacing .06–.08em.
 
 ## Space, grid, radius, motion
@@ -67,7 +69,7 @@ All interactive components: default, hover, focus-visible, active, disabled, loa
 - **Pareto mini-chart**, **Explanation block** (why / benefit / cost / confidence / caveats), **Data-status badge** L0–L7, **Coverage indicator** (3 bars), **Event card**, **Mode / building / departure-window pickers**, **Legend**, **Time scrubber** (play, sparkline + band, range), **Exposure timeline** (hourly stacks + segment strip), **Proactive card**, **What-if chips + answer card**, **Disclaimer** "Estimates, not measurements. Lower exposure doesn't mean safe."
 
 ## Map
-Basemap: OpenStreetMap raster, greyscale + inverted/dimmed in dark theme via CSS filter (CARTO also works where a key/referrer is allowed). Field: hex bins ≈1.2 km, 14% gap; coverage <5% → --hex-empty. Uncertainty mode recolours hexes on --unc ramp and swaps the legend. Markers: start ring, end square, station diamond, fire chip, wind arrows (length ∝ speed). Click → dashed crosshairs + popover "PM2.5 ~142 µg/m³ (110–181) · category · confidence"; outside bbox → "Outside the covered area".
+Basemap: CARTO `dark_nolabels` / `light_nolabels` with `*_only_labels` on top at 70%, attribution "© OpenStreetMap contributors · © CARTO" (free tier; check CARTO's terms before commercial launch). Field: hex bins ≈1.2 km, 14% gap; coverage <5% → --hex-empty. Uncertainty mode recolours hexes on --unc ramp and swaps the legend. Markers: start ring, end square, station diamond, fire chip, wind arrows (length ∝ speed). Click → dashed crosshairs + popover "PM2.5 ~142 µg/m³ (110–181) · category · confidence"; outside bbox → "Outside the covered area".
 
 ## Copy rules
 IST 24h ("18:15"), µg for dose, µg/m³ for concentration, ranges always. Never "safe", "healthy", "toxic". Use "estimated", "predicted", "about", "lower", "higher". Say plainly when options aren't reliably different.

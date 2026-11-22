@@ -6,6 +6,7 @@ import {
   Palette, Pause, Play, Plus, RadioTower, RefreshCw, RotateCcw, Route, Satellite, ScanLine, Search, SlidersHorizontal, Smartphone,
   Sparkles, Sun, Sunrise, Timer, ToggleRight, TrainFront, TrendingUp, Utensils, Wind, X, type LucideIcon,
   AirVent, ArrowDownRight, Bell, Building2, ChevronRight, Download, Gauge, Info, Lightbulb, MoveUpRight, Tornado, TrainTrack, TriangleAlert,
+  Send, ShieldCheck, Trash2, User,
 } from 'lucide-react';
 
 /* Lucide line icons re-stroked to 1.6 (design system §Iconography), plus three custom glyphs. */
@@ -22,6 +23,7 @@ const LUCIDE: Record<string, LucideIcon> = {
   'trending-up': TrendingUp, utensils: Utensils, wind: Wind, x: X,
   'air-vent': AirVent, 'arrow-down-right': ArrowDownRight, bell: Bell, 'building-2': Building2, 'chevron-right': ChevronRight, download: Download,
   gauge: Gauge, info: Info, lightbulb: Lightbulb, 'move-up-right': MoveUpRight, tornado: Tornado, 'train-track': TrainTrack, 'triangle-alert': TriangleAlert,
+  send: Send, 'shield-check': ShieldCheck, 'trash-2': Trash2, user: User,
 };
 
 const stroke = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;

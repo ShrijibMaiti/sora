@@ -1,11 +1,38 @@
-import { useMemo } from 'react';
-import { ME, dayBars, hhmm, type DaySeg } from '../../data/sora';
-import { activeField, useSora } from '../../state/store';
+import { useMemo, useState } from 'react';
+import { BUILDINGS, ME, PLACES, dayBars, hhmm, type BuildingKey, type DaySeg } from '../../data/sora';
+import { NEW_STOP, activeField, useSora, type DayStop } from '../../state/store';
 import { istDay } from '../../lib/time';
+import { Select } from '../Chrome';
 import { Icon } from '../Icon';
 import { Disclaimer, Dl, PanelHeader, SubTabs } from './shared';
 
 const fmt = (n: number) => n.toLocaleString('en-IN');
+const PLACE_OPTS = PLACES.filter((p) => p.k !== 'noida').map((p) => ({ k: p.k, label: p.name }));
+const ACTIVITY: { k: DayStop['activity']; label: string }[] = [{ k: 'rest', label: 'Resting' }, { k: 'light', label: 'Light: sitting, walking' }, { k: 'moderate', label: 'Moderate' }, { k: 'high', label: 'Exercise' }];
+const COUNT = ['Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
+const lbl = (t: string) => <span className="eyebrow">{t}</span>;
+
+function StopEditor({ i, onRemove }: { i: number; onRemove: () => void }) {
+  const { st, set } = useSora();
+  const s = st.dayStops[i], n = st.dayStops.length, first = i === 0, last = i === n - 1;
+  const up = (p: Partial<DayStop>) => set((x) => ({ dayStops: x.dayStops.map((d, j) => (j === i ? { ...d, ...p } : d)) }));
+  return (
+    <div className="stack g20" style={{ padding: '4px 0 24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,160px),1fr))', gap: '20px 16px' }}>
+        <label className="field">{lbl('Name')}<div className="input-box"><input value={s.name} maxLength={32} onChange={(e) => up({ name: e.target.value })} /></div></label>
+        <label className="field">{lbl('Place')}<Select className="sel-lg" chevClass="lg" value={s.place} options={PLACE_OPTS} label="Place" onChange={(v) => up({ place: v })} /></label>
+        {!first && <label className="field">{lbl('Arrive after · optional')}<div className="input-box"><Icon name="clock" size={15} /><input type="time" value={s.after} onChange={(e) => up({ after: e.target.value })} /><span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-tertiary)' }}>IST</span></div></label>}
+        {!last && <label className="field">{lbl(first ? 'Leave at' : 'Leave by · optional')}<div className="input-box"><Icon name="flag" size={15} /><input type="time" value={s.before} onChange={(e) => up({ before: e.target.value })} /><span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-tertiary)' }}>IST</span></div></label>}
+        {!first && !last && <label className="field">{lbl('Stay')}<div className="input-box"><Icon name="timer" size={15} /><input type="number" min={15} max={720} step={5} value={s.dur} onChange={(e) => up({ dur: Math.max(15, Math.min(720, +e.target.value || 15)) })} /><span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>min</span></div></label>}
+        <label className="field">{lbl('Building')}<Select<BuildingKey> className="sel-lg" chevClass="lg" value={s.bld} options={BUILDINGS} label="Building" onChange={(v) => up({ bld: v })} /></label>
+        {!first && !last && <label className="field">{lbl('Activity')}<Select<DayStop['activity']> className="sel-lg" chevClass="lg" value={s.activity} options={ACTIVITY} label="Activity" onChange={(v) => up({ activity: v })} /></label>}
+        {!first && !last && <label className="field">{lbl('Alternative place · optional')}<Select className="sel-lg" chevClass="lg" value={s.alt} options={[{ k: '', label: 'None' }, ...PLACE_OPTS.filter((p) => p.k !== s.place)]} label="Alternative place" onChange={(v) => up({ alt: v })} /></label>}
+        {!first && !last && s.alt && <label className="field">{lbl('Alternative building')}<Select<BuildingKey> className="sel-lg" chevClass="lg" value={s.altBld} options={BUILDINGS} label="Alternative building" onChange={(v) => up({ altBld: v })} /></label>}
+      </div>
+      {!first && !last && <button className="btn-ghost-sm" style={{ alignSelf: 'flex-start', display: 'inline-flex', gap: 8, alignItems: 'center' }} onClick={onRemove}><Icon name="trash-2" size={14} />Remove stop</button>}
+    </div>
+  );
+}
 
 function Strip({ segs }: { segs: DaySeg[] }) {
   return (
@@ -18,6 +45,9 @@ function Strip({ segs }: { segs: DaySeg[] }) {
 export function DayPanel() {
   const { st, set, loadDay } = useSora();
   const sub = st.sub.day, DAY = st.day, F = activeField(st);
+  const [open, setOpen] = useState<number | null>(null);
+  const [sent, setSent] = useState(() => JSON.stringify(st.dayStops));
+  const dirty = JSON.stringify(st.dayStops) !== sent, stops = st.dayStops, n = stops.length;
   const { bo, bn, mxb } = useMemo(() => {
     if (!DAY) return { bo: [], bn: [], mxb: 1 };
     const bo = dayBars(DAY.original, 7, 23), bn = dayBars(DAY.optimized, 7, 23);
@@ -26,12 +56,15 @@ export function DayPanel() {
   if (!DAY) return <p className="lede" aria-busy="true">{st.dayBusy ? 'Optimizing your day…' : 'Loading your day…'}</p>;
   const T = DAY.total;
   const cur = st.dayView === 'opt' ? bn : bo;
-  const optimize = async () => { await loadDay(); set((s) => ({ sub: { ...s.sub, day: 'result' } })); };
+  const optimize = async () => { setSent(JSON.stringify(st.dayStops)); setOpen(null); await loadDay(); set((s) => ({ sub: { ...s.sub, day: 'result' } })); };
+  const addStop = () => { set((s) => ({ dayStops: [...s.dayStops.slice(0, -1), { ...NEW_STOP }, s.dayStops[s.dayStops.length - 1]] })); setOpen(n - 1); };
+  const removeStop = (i: number) => { set((s) => ({ dayStops: s.dayStops.filter((_, j) => j !== i) })); setOpen(null); };
+  const placeName = (k: string) => PLACES.find((p) => p.k === k)?.name ?? '';
   const mono = { fontFamily: 'var(--font-mono)' };
 
   return (
     <div className="stack g32">
-      <PanelHeader eyebrow={`03 · Plan my day · ${F ? istDay(F.times[0]) : ''}`} title="Five stops. One day of air.">
+      <PanelHeader eyebrow={`03 · Plan my day · ${F ? istDay(F.times[0]) : ''}`} title={`${COUNT[n - 2] ?? n} stops. One day of air.`}>
         <p className="lede">Sora looks at the whole day together — when you leave, which gym, how you get to dinner — not one trip at a time.</p>
       </PanelHeader>
       <SubTabs items={[['schedule', 'Schedule'], ['result', 'Result'], ['changes', 'Changes'], ['timeline', 'Timeline']]} value={sub} onPick={(k) => set((s) => ({ sub: { ...s.sub, day: k } }))} />
@@ -40,21 +73,32 @@ export function DayPanel() {
         <section aria-label="Schedule" className="sec">
           <span className="eyebrow">Schedule</span>
           <ol className="stack" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
-            {DAY.stops.map((s, i) => (
-              <li key={i} style={{ display: 'grid', gridTemplateColumns: '96px 20px minmax(0,1fr)', gap: 16, alignItems: 'start', padding: '18px 0', borderBottom: '1px solid var(--border-subtle)' }}>
-                <span className="mono" style={{ fontSize: 12, color: 'var(--text-secondary)', paddingTop: 3 }}>{s.window}</span>
-                <span style={{ display: 'flex', paddingTop: 2, color: 'var(--text-secondary)' }}><Icon name={s.icon} size={16} /></span>
-                <span className="stack" style={{ gap: 4, minWidth: 0 }}>
-                  <span style={{ fontSize: 16, letterSpacing: '-.01em' }}>{s.name} <span style={{ color: 'var(--text-secondary)' }}>· {i === 2 && st.dayDone && st.dayView === 'opt' ? 'Gym B · Green Park' : s.place}</span></span>
-                  <span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{s.bld}{s.dur ? ' · ' + s.dur : ''}</span>
-                </span>
-              </li>
-            ))}
+            {stops.map((s, i) => {
+              const r = !dirty ? DAY.stops[i] : undefined, isOpen = open === i;
+              const where = r ? (st.dayView === 'opt' ? r.chosen : r.place) : placeName(s.place);
+              const when = r ? r.window : [s.after && `after ${s.after}`, s.before && `by ${s.before}`].filter(Boolean).join(' · ') || '—';
+              return (
+                <li key={i} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                  <button className="row-btn" aria-expanded={isOpen} aria-controls={'stop-' + i} onClick={() => setOpen(isOpen ? null : i)}
+                    style={{ width: '100%', display: 'grid', gridTemplateColumns: '96px 20px minmax(0,1fr) 16px', gap: 16, alignItems: 'start', padding: '18px 0', textAlign: 'left' }}>
+                    <span className="mono" style={{ fontSize: 'var(--fs-label)', color: 'var(--text-secondary)', paddingTop: 3 }}>{when}</span>
+                    <span style={{ display: 'flex', paddingTop: 2, color: 'var(--text-secondary)' }}><Icon name={r?.icon ?? 'map-pin'} size={16} /></span>
+                    <span className="stack" style={{ gap: 4, minWidth: 0 }}>
+                      <span style={{ fontSize: 'var(--fs-h4)', letterSpacing: '-.01em' }}>{s.name || 'Stop'} <span style={{ color: 'var(--text-secondary)' }}>· {where}</span></span>
+                      <span style={{ fontSize: 'var(--fs-small)', color: 'var(--text-tertiary)' }}>{r ? r.bld + (r.dur ? ' · ' + r.dur : '') : BUILDINGS.find((b) => b.k === s.bld)!.label + (s.dur ? ` · ${s.dur} min` : '')}</span>
+                    </span>
+                    <span style={{ display: 'flex', paddingTop: 3, color: 'var(--text-tertiary)', transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform var(--dur-base) var(--ease-standard)' }}><Icon name="chevron-down" size={16} /></span>
+                  </button>
+                  {isOpen && <div id={'stop-' + i}><StopEditor i={i} onRemove={() => removeStop(i)} /></div>}
+                </li>
+              );
+            })}
           </ol>
+          {dirty && <p className="lede" role="status" style={{ fontSize: 'var(--fs-ui)' }}>Schedule changed. Optimize to update the result.</p>}
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-            <button className="btn-outline"><Icon name="plus" size={14} />Add a stop</button>
-            <button className="btn-primary" onClick={optimize}>
-              {st.dayBusy && <span className="spin" />}{st.dayBusy ? 'Optimizing…' : st.dayDone ? 'Re-optimize my day' : 'Optimize my day'}
+            <button className="btn-outline" onClick={addStop} disabled={n >= 10}><Icon name="plus" size={14} />Add a stop</button>
+            <button className="btn-primary" onClick={optimize} aria-busy={st.dayBusy}>
+              {st.dayBusy && <span className="spin" />}{st.dayBusy ? 'Optimizing…' : dirty ? 'Optimize my day' : 'Re-optimize my day'}
             </button>
           </div>
         </section>
@@ -65,14 +109,14 @@ export function DayPanel() {
           <span className="eyebrow">Result · 07:00–23:00</span>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
             <div className="stack g8">
-              <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>Original day</span>
-              <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}><span className="tnum" style={{ fontSize: 44, fontWeight: 300, lineHeight: 1, letterSpacing: '-.03em', color: 'var(--text-secondary)' }}>{fmt(T.orig.median)}</span><span style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>µg</span></span>
-              <span className="mono" style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>({fmt(T.orig.p05)}–{fmt(T.orig.p95)})</span>
+              <span style={{ fontSize: 'var(--fs-small)', color: 'var(--text-secondary)' }}>Original day</span>
+              <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}><span className="tnum" style={{ fontSize: 'var(--fs-num-2xl)', fontWeight: 300, lineHeight: 1, letterSpacing: '-.03em', color: 'var(--text-secondary)' }}>{fmt(T.orig.median)}</span><span style={{ fontSize: 'var(--fs-small)', color: 'var(--text-tertiary)' }}>µg</span></span>
+              <span className="mono" style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>({fmt(T.orig.p05)}–{fmt(T.orig.p95)})</span>
             </div>
             <div className="stack g8" style={{ paddingLeft: 24, borderLeft: '1px solid var(--border-default)' }}>
-              <span style={{ fontSize: 13, color: 'var(--brand)' }}>Optimized day</span>
-              <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}><span className="tnum" style={{ fontSize: 44, fontWeight: 300, lineHeight: 1, letterSpacing: '-.03em' }}>{fmt(T.opt.median)}</span><span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>µg</span></span>
-              <span className="mono" style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>({fmt(T.opt.p05)}–{fmt(T.opt.p95)})</span>
+              <span style={{ fontSize: 'var(--fs-small)', color: 'var(--brand)' }}>Optimized day</span>
+              <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}><span className="tnum" style={{ fontSize: 'var(--fs-num-2xl)', fontWeight: 300, lineHeight: 1, letterSpacing: '-.03em' }}>{fmt(T.opt.median)}</span><span style={{ fontSize: 'var(--fs-small)', color: 'var(--text-secondary)' }}>µg</span></span>
+              <span className="mono" style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>({fmt(T.opt.p05)}–{fmt(T.opt.p95)})</span>
             </div>
           </div>
           <Dl gap="14px 24px" rows={[
@@ -90,8 +134,8 @@ export function DayPanel() {
             {DAY.changes.map((c) => (
               <li key={c.title} style={{ display: 'grid', gridTemplateColumns: '20px minmax(0,1fr) auto', gap: 14, alignItems: 'start' }}>
                 <span style={{ color: 'var(--brand)', display: 'flex', paddingTop: 3 }}><Icon name={c.icon} size={16} /></span>
-                <span className="stack g6"><span style={{ fontSize: 17, letterSpacing: '-.01em' }}>{c.title}</span><span style={{ fontSize: 14, lineHeight: 1.55, color: 'var(--text-secondary)' }}>{c.detail}</span></span>
-                <span className="mono" style={{ fontSize: 13, color: 'var(--success)', paddingTop: 3 }}>{c.delta}</span>
+                <span className="stack g6"><span style={{ fontSize: 'var(--fs-lead)', letterSpacing: '-.01em' }}>{c.title}</span><span style={{ fontSize: 'var(--fs-ui)', lineHeight: 1.55, color: 'var(--text-secondary)' }}>{c.detail}</span></span>
+                <span className="mono" style={{ fontSize: 'var(--fs-small)', color: 'var(--success)', paddingTop: 3 }}>{c.delta}</span>
               </li>
             ))}
           </ol>
@@ -109,7 +153,7 @@ export function DayPanel() {
             </div>
           </div>
           <div role="img" style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 140, borderBottom: '1px solid var(--border-default)', marginTop: 8 }}
-            aria-label={`Hourly dose 07:00–23:00 stacked by microenvironment. Original day ${T.orig.median} µg (${T.orig.p05}–${T.orig.p95}); optimized ${T.opt.median} µg (${T.opt.p05}–${T.opt.p95}), mostly lower during the gym session and the trip to Khan Market.`}>
+            aria-label={`Hourly dose 07:00–23:00 stacked by microenvironment. Original day ${T.orig.median} µg (${T.orig.p05}–${T.orig.p95}); optimized ${T.opt.median} µg (${T.opt.p05}–${T.opt.p95}).${DAY.changes.length ? ' Main change: ' + DAY.changes[0].title + '.' : ''}`}>
             {cur.map((b, i) => (
               <div key={b.h} style={{ flex: 1, display: 'flex', flexDirection: 'column-reverse', gap: 1, height: '100%', position: 'relative' }}>
                 {b.parts.map((p) => <span key={p.me} style={{ height: ((p.v / mxb) * 106).toFixed(1) + 'px', background: p.c, borderRadius: 1, flex: 'none' }} />)}
@@ -117,15 +161,15 @@ export function DayPanel() {
               </div>
             ))}
           </div>
-          <div className="mono" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-tertiary)' }}><span>07:00</span><span>11:00</span><span>15:00</span><span>19:00</span><span>23:00</span></div>
+          <div className="mono" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--fs-micro)', color: 'var(--text-tertiary)' }}><span>07:00</span><span>11:00</span><span>15:00</span><span>19:00</span><span>23:00</span></div>
           <div className="stack" style={{ gap: 10, marginTop: 8 }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '80px minmax(0,1fr)', gap: 12, alignItems: 'center' }}><span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Original</span><Strip segs={DAY.original} /></div>
-            <div style={{ display: 'grid', gridTemplateColumns: '80px minmax(0,1fr)', gap: 12, alignItems: 'center' }}><span style={{ fontSize: 12, color: 'var(--brand)' }}>Optimized</span><Strip segs={DAY.optimized} /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '80px minmax(0,1fr)', gap: 12, alignItems: 'center' }}><span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>Original</span><Strip segs={DAY.original} /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '80px minmax(0,1fr)', gap: 12, alignItems: 'center' }}><span style={{ fontSize: 'var(--fs-label)', color: 'var(--brand)' }}>Optimized</span><Strip segs={DAY.optimized} /></div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: '12px 20px', marginTop: 8 }}>
-            {ME.map((m) => <span key={m.k} style={{ display: 'inline-flex', alignItems: 'center', gap: 10, fontSize: 13, color: 'var(--text-secondary)' }}><span className="sw" style={{ background: `var(--me-${m.k})` }} />{m.label}</span>)}
+            {ME.map((m) => <span key={m.k} style={{ display: 'inline-flex', alignItems: 'center', gap: 10, fontSize: 'var(--fs-small)', color: 'var(--text-secondary)' }}><span className="sw" style={{ background: `var(--me-${m.k})` }} />{m.label}</span>)}
           </div>
-          <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Dashed line: the original day's hourly dose, for comparison.</span>
+          <span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>Dashed line: the original day's hourly dose, for comparison.</span>
         </section>
       )}
       <Disclaimer />

@@ -45,15 +45,15 @@ export function MapView({ L: lay }: { L: Layout }) {
     return () => { cancelAnimationFrame(raf); map.remove(); mapRef.current = null; g.current = null; };
   }, [mapRef, ref, set, runPlan]);
 
-  /* basemap per theme */
+  /* basemap per theme: CARTO (DESIGN.md §Map), labels on top at 70% so the field leads */
   useEffect(() => {
     const map = mapRef.current, G = g.current;
     if (!map || !G) return;
-    const th = st.theme === 'light' ? 'Light' : 'Dark';
+    const th = st.theme === 'light' ? 'light' : 'dark';
     if (G.tiles) { map.removeLayer(G.tiles); map.removeLayer(G.labels!); }
-    const base = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_' + th;
-    G.tiles = L.tileLayer(base + '_Gray_Base/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16 }).addTo(map);
-    G.labels = L.tileLayer(base + '_Gray_Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16, pane: 'shadowPane', opacity: 0.8 }).addTo(map);
+    const url = (v: string) => `https://{s}.basemaps.cartocdn.com/${th}_${v}/{z}/{x}/{y}{r}.png`;
+    G.tiles = L.tileLayer(url('nolabels'), { maxZoom: 16, subdomains: 'abcd' }).addTo(map);
+    G.labels = L.tileLayer(url('only_labels'), { maxZoom: 16, subdomains: 'abcd', pane: 'shadowPane', opacity: 0.7 }).addTo(map);
   }, [st.theme, mapRef]);
 
   /* hexes, stations, fires: rebuilt when a city's PM2.5 field (re)loads */
@@ -81,14 +81,16 @@ export function MapView({ L: lay }: { L: Layout }) {
   useEffect(() => {
     const G = g.current;
     if (!G || !F) return;
-    const dark = st.theme !== 'light', empty = dark ? '#2a2c31' : '#d5d9e0', op = dark ? 0.36 : 0.34;
+    /* the canvas renderer can't read CSS variables: resolve the token palette once per pass */
+    const dark = st.theme !== 'light', empty = css('--hex-empty'), op = dark ? 0.36 : 0.34;
+    const aqi = AQI.map((a) => css(a.v)), unc = UNC.map((_, i) => css(`--unc-${i + 1}`));
     for (const h of G.hexes) {
       let fill: string, fo: number;
       if (h.cov < 0.05) { fill = empty; fo = 0.8; }
       else {
         const s = sampleField(F, st.t, h.la, h.lo);
-        if (st.unc) { fill = UNC[Math.max(0, Math.min(7, Math.round(((s.spread - 0.2) / 0.55) * 7)))]; fo = 0.72; }
-        else { fill = AQI[s.cat].color; fo = op; }
+        if (st.unc) { fill = unc[Math.max(0, Math.min(7, Math.round(((s.spread - 0.2) / 0.55) * 7)))]; fo = 0.72; }
+        else { fill = aqi[s.cat]; fo = op; }
       }
       h.poly.setStyle({ fillColor: fill, fillOpacity: fo });
     }
@@ -194,20 +196,20 @@ function PointPopover() {
         width: 236, borderColor: 'var(--border-strong)', borderRadius: 'var(--radius-md)', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 6, zIndex: 820,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{fmtCoords(st.pt)}</span>
+          <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-tertiary)' }}>{fmtCoords(st.pt)}</span>
           <button onClick={() => set({ pt: null })} aria-label="Close" style={{ width: 24, height: 24, border: 0, background: 'transparent', display: 'grid', placeItems: 'center', color: 'var(--text-secondary)', marginRight: -6 }}><Icon name="x" size={13} /></button>
         </div>
         {inside ? (
           <div className="stack g6">
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--fs-label)' }}>
               <span className="sw" style={{ background: c.color }} />
               <span>{P.label} <span className="mono">~{v.val} {P.unit}</span> <span className="mono" style={{ color: 'var(--text-tertiary)' }}>({v.lo}–{v.hi})</span></span>
             </span>
-            <span style={{ fontSize: 12 }}>{c.name}</span>
-            <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>Confidence: {v.conf}</span>
+            <span style={{ fontSize: 'var(--fs-label)' }}>{c.name}</span>
+            <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-secondary)' }}>Confidence: {v.conf}</span>
           </div>
         ) : (
-          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Outside the covered area. No estimate here.</span>
+          <span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-secondary)' }}>Outside the covered area. No estimate here.</span>
         )}
       </div>
     </>

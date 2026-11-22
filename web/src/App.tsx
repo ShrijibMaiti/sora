@@ -4,7 +4,7 @@ import { ProfileMenu, Rail, TabBar } from './components/Chrome';
 import { MapView } from './components/MapView';
 import { SidePanel } from './components/SidePanel';
 import { FloatTop, MapControls, TimeScrubber } from './components/MapChrome';
-import { BootOverlay, FullState, Onboarding } from './components/Overlays';
+import { BootOverlay, FullState, Onboarding, Toast } from './components/Overlays';
 import { Insights } from './components/Insights';
 
 /** Sora App v4: full-bleed map, floating rail + slide-over panel (bottom sheet + tab bar on mobile). */
@@ -26,6 +26,7 @@ export default function App() {
         <Insights L={L} />
       </div>
       {L.mob && <TabBar L={L} />}
+      <Toast />
       <Onboarding />
     </div>
   );

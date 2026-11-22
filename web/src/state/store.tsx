@@ -1,13 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Map as LeafletMap } from 'leaflet';
 import {
-  CITIES, PLACES, PLAN_ERRORS, POLL, WHATIF,
+  CITIES, PLACES, PLAN_ERRORS, POLL, WHATIF, toMin,
   type BuildingKey, type City, type LatLng, type ModeKey, type PlanOk, type PlanResult, type PollKey, type RouteId, type TripOption,
 } from '../data/sora';
 import { ApiError, api, type DayView } from '../api/client';
 import type { ApiEvent, Change, CounterfactualResponse, DayRequest, Field, PlanRequest } from '../api/types';
 import { fieldSeries } from '../lib/field';
-import { HOUR_MS, hourIndex, istTimeOnOrAfter } from '../lib/time';
+import { HOUR_MS, hourIndex, istDayStart, istHHMM, istTimeOnOrAfter } from '../lib/time';
 
 export type Tab = 'live' | 'trip' | 'day' | 'what' | 'ins';
 export type Demo = 'none' | 'loading' | 'offline' | 'degraded' | 'unreliable' | 'nofeasible' | 'notbuilt';
@@ -17,6 +17,12 @@ export type Trip = {
 };
 export type SubTabs = { live: 'overview' | 'poll' | 'events' | 'data'; trip: 'options' | 'why' | 'chart'; day: 'schedule' | 'result' | 'changes' | 'timeline' };
 export type WhatIfAnswer = CounterfactualResponse | 'error' | null;
+/** One row of the Plan my day editor. Times are IST "HH:MM" ('' = no constraint); dur in minutes (0 = until the next leg). */
+export type DayStop = {
+  name: string; place: string; alt: string; altBld: BuildingKey;
+  after: string; before: string; dur: number; bld: BuildingKey; activity: 'rest' | 'light' | 'moderate' | 'high';
+};
+export const NEW_STOP: DayStop = { name: 'New stop', place: 'cp', alt: '', altBld: 'naturally_ventilated', after: '', before: '', dur: 60, bld: 'naturally_ventilated', activity: 'light' };
 
 export type State = {
   w: number; h: number; booting: boolean; theme: Theme;
@@ -32,6 +38,7 @@ export type State = {
   cities: City[]; reload: number;
   fields: Partial<Record<PollKey, Field | 'unavailable'>>;
   events: ApiEvent[]; day: DayView | null; whatif: WhatIfAnswer[];
+  dayStops: DayStop[]; toast: string | null;
 };
 
 const store = {
@@ -67,7 +74,28 @@ function initialState(): State {
     prefs: { mode: 'car_ac', bld: 'naturally_ventilated', extra: 15 },
     sub: { live: 'overview', trip: 'options', day: 'result' },
     cities: CITIES, reload: 0, fields: {}, events: [], day: null, whatif: WHATIF.map(() => null),
+    dayStops: [
+      { name: 'Home', place: 'lajpat', alt: '', altBld: 'naturally_ventilated', after: '', before: '08:20', dur: 0, bld: 'naturally_ventilated', activity: 'rest' },
+      { name: 'College', place: 'iitd', alt: '', altBld: 'naturally_ventilated', after: '08:45', before: '', dur: 455, bld: 'naturally_ventilated', activity: 'light' },
+      { name: 'Gym', place: 'hkv', alt: 'greenpark', altBld: 'ac_filtered', after: '', before: '', dur: 75, bld: 'naturally_ventilated', activity: 'high' },
+      { name: 'Restaurant', place: 'khan', alt: '', altBld: 'naturally_ventilated', after: '18:45', before: '', dur: 105, bld: 'ac_sealed', activity: 'light' },
+      { name: 'Home', place: 'lajpat', alt: '', altBld: 'naturally_ventilated', after: '', before: '', dur: 0, bld: 'naturally_ventilated', activity: 'rest' },
+    ],
+    toast: null,
   };
+}
+
+/* ---------- on-device storage for reminders and "notify me" (spec §40: nothing here leaves the device) ---------- */
+type Reminder = { at: string; title: string; body: string };
+const readList = <T,>(k: string): T[] => { try { return JSON.parse(store.get(k) || '[]') as T[]; } catch { return []; } };
+const DEVICE_KEYS = ['sora.reminders', 'sora.notify'];
+// shortcut: reminders fire only while a Sora tab is open (setTimeout + Notification); needs a service worker + push for background delivery
+function schedule(r: Reminder) {
+  const ms = Date.parse(r.at) - Date.now();
+  if (ms <= 0 || ms > 86400e3) return;
+  setTimeout(() => {
+    if ('Notification' in window && Notification.permission === 'granted') new Notification(r.title, { body: r.body });
+  }, ms);
 }
 
 export const placeLL = (st: State, k: string): LatLng | undefined =>
@@ -111,18 +139,18 @@ function questionChanges(F: Field): Change[] {
   ];
 }
 
-/* The sample day shown in Plan my day (until the schedule editor exists): Home → College → Gym (2 choices) → Restaurant → Home. */
-function sampleDay(st: State): DayRequest {
+/** POST /api/day body from the Plan my day editor, on the forecast's first IST day. */
+function dayRequest(st: State, F: Field): DayRequest {
   const P = (k: string) => { const p = PLACES.find((x) => x.k === k)!; return { label: p.name, lat: p.ll[0], lon: p.ll[1] }; };
+  const day0 = istDayStart(F.times[0]), at = (t: string) => (t ? new Date(day0 + toMin(t) * 60e3).toISOString() : undefined);
   return {
-    city: st.city, mode: 'auto', max_extra_min: st.prefs.extra,
-    stops: [
-      { name: 'Home', place: P('lajpat'), building: 'naturally_ventilated', activity: 'rest' },
-      { name: 'College', place: P('iitd'), duration_min: 455, building: 'naturally_ventilated', activity: 'light' },
-      { name: 'Gym', place: P('hkv'), alternatives: [P('greenpark')], duration_min: 75, building: 'naturally_ventilated', activity: 'high' },
-      { name: 'Restaurant', place: P('khan'), duration_min: 105, building: 'ac_sealed', activity: 'light' },
-      { name: 'Home', place: P('lajpat'), building: 'naturally_ventilated', activity: 'rest' },
-    ],
+    city: st.city, mode: st.prefs.mode, max_extra_min: st.prefs.extra,
+    stops: st.dayStops.map((s) => ({
+      name: s.name.trim() || 'Stop', place: P(s.place),
+      alternatives: s.alt ? [{ ...P(s.alt), building: s.altBld }] : undefined,
+      arrive_after: at(s.after), leave_before: at(s.before), duration_min: s.dur || undefined,
+      building: s.bld, activity: s.activity,
+    })),
   };
 }
 
@@ -189,11 +217,44 @@ function useSoraStore() {
     if (id === seq.current.whatif) set({ whatif: answers });
   }, [set]);
 
-  const loadDay = useCallback(async () => {
-    set({ dayBusy: true });
-    try { set({ day: await api.day(sampleDay(ref.current)), dayBusy: false, dayDone: true }); }
-    catch (e) { set({ dayBusy: false, ...(isOffline(e) ? { offline: true } : {}) }); }
+  const toastTimer = useRef(0);
+  const notify = useCallback((msg: string) => {
+    clearTimeout(toastTimer.current);
+    set({ toast: msg });
+    toastTimer.current = window.setTimeout(() => set({ toast: null }), 5000);
   }, [set]);
+
+  /** `field` is passed at load time: set() updates ref.current lazily, so the new field may not be in it yet. */
+  const loadDay = useCallback(async (field?: Field) => {
+    const F = field ?? ref.current.fields.pm25;
+    if (!F || F === 'unavailable') return;
+    set({ dayBusy: true });
+    try { set({ day: await api.day(dayRequest(ref.current, F)), dayBusy: false, dayDone: true }); }
+    catch (e) {
+      set({ dayBusy: false, ...(isOffline(e) ? { offline: true } : {}) });
+      if (!isOffline(e)) notify((e as ApiError).message);
+    }
+  }, [set, notify]);
+
+  /** Save an on-device reminder and ask for notification permission. */
+  const remind = useCallback(async (r: Reminder) => {
+    if ('Notification' in window && Notification.permission === 'default') { try { await Notification.requestPermission(); } catch { /* blocked */ } }
+    store.set('sora.reminders', JSON.stringify([...readList<Reminder>('sora.reminders'), r]));
+    schedule(r);
+    const denied = !('Notification' in window) || Notification.permission === 'denied';
+    notify(`Reminder set for ${istHHMM(r.at)}.` + (denied ? ' Notifications are blocked in this browser, so check back then.' : ' It arrives while Sora is open in a tab.'));
+  }, [notify]);
+
+  const notifyWhenLive = useCallback((key: string) => {
+    store.set('sora.notify', JSON.stringify([...new Set([...readList<string>('sora.notify'), key])]));
+    notify(`Saved. You'll see a notice here when ${cityOf(key).name} goes live.`);
+  }, [notify]);
+
+  const clearHistory = useCallback(() => {
+    DEVICE_KEYS.forEach((k) => { try { localStorage.removeItem(k); } catch { /* private mode */ } });
+    set({ menuOpen: false });
+    notify('History on this device deleted: reminders and saved notices.');
+  }, [set, notify]);
 
   const selectOpt = useCallback((id: RouteId) => {
     const res = ref.current.res;
@@ -231,7 +292,16 @@ function useSoraStore() {
   /* mount: cities, resize, keyboard, play loop */
   useEffect(() => {
     document.documentElement.dataset.theme = ref.current.theme;
-    api.cities().then((list) => { CITY_LIST = list; set({ cities: list }); }, () => { /* keep the static list; field load reports offline */ });
+    api.cities().then((list) => {
+      CITY_LIST = list;
+      set({ cities: list });
+      const waiting = readList<string>('sora.notify'), live = list.filter((c) => c.built && waiting.includes(c.key));
+      if (live.length) {
+        store.set('sora.notify', JSON.stringify(waiting.filter((k) => !live.some((c) => c.key === k))));
+        notify(`${live.map((c) => c.name).join(' and ')} ${live.length > 1 ? 'are' : 'is'} now live in Sora.`);
+      }
+    }, () => { /* keep the static list; field load reports offline */ });
+    readList<Reminder>('sora.reminders').forEach(schedule);
     const onR = () => set({ w: window.innerWidth, h: window.innerHeight });
     const onK = (e: KeyboardEvent) => {
       if (e.key === 'Escape') set({ cityOpen: false, menuOpen: false, searchOpen: false, layersOpen: false, pt: null, pick: null });
@@ -245,7 +315,7 @@ function useSoraStore() {
       if (s.playing && F && !document.hidden) set({ t: (s.t + 1) % F.times.length });
     }, rm ? 1500 : 700);
     return () => { clearInterval(iv); window.removeEventListener('resize', onR); window.removeEventListener('keydown', onK); };
-  }, [set, rm, openSearch]);
+  }, [set, rm, openSearch, notify]);
 
   /* city (or retry): PM2.5 field first, then plan, events, day and the other pollutants */
   useEffect(() => {
@@ -258,7 +328,7 @@ function useSoraStore() {
         if (!live) return;
         set({ fields: { pm25: pm }, booting: false, offline: false });
         runPlan(false);
-        loadDay();
+        loadDay(pm);
         api.events(city).then((ev) => live && set({ events: ev }), () => {});
         POLL.filter((p) => p.k !== 'pm25').forEach((p) => api.field(city, p.k).then(
           (f) => live && set((s) => ({ fields: { ...s.fields, [p.k]: f } })),
@@ -272,7 +342,10 @@ function useSoraStore() {
     return () => { live = false; };
   }, [st.city, st.reload, set, runPlan, loadDay]);
 
-  return { st, set, ref, mapRef, searchElRef, rm, runPlan, askWhatIf, loadDay, selectOpt, setTrip, applyDemo, toggleTheme, finishOnboarding, flyTo, openSearch };
+  return {
+    st, set, ref, mapRef, searchElRef, rm, runPlan, askWhatIf, loadDay, selectOpt, setTrip, applyDemo, toggleTheme, finishOnboarding, flyTo, openSearch,
+    notify, remind, notifyWhenLive, clearHistory,
+  };
 }
 
 export type Sora = ReturnType<typeof useSoraStore>;

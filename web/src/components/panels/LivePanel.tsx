@@ -43,8 +43,8 @@ export function LivePanel() {
             <span className="eyebrow">City average · {P.label}</span>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
               <span className="big-num">{now.val}</span>
-              <span style={{ fontSize: 15, color: 'var(--text-secondary)' }}>{P.unit}</span>
-              <span className="mono" style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>({now.lo}–{now.hi})</span>
+              <span style={{ fontSize: 'var(--fs-body)', color: 'var(--text-secondary)' }}>{P.unit}</span>
+              <span className="mono" style={{ fontSize: 'var(--fs-small)', color: 'var(--text-tertiary)' }}>({now.lo}–{now.hi})</span>
             </div>
             <figure style={{ margin: '8px 0 0', position: 'relative' }}
               aria-label={`City average ${P.label} over 72 hours, peaking each evening between 19:00 and 22:00. At ${tl.short}: ${now.val} ${P.unit}, range ${now.lo}–${now.hi}.`}>
@@ -55,7 +55,7 @@ export function LivePanel() {
               </svg>
               <span style={{ position: 'absolute', left: ((st.t / N) * 100).toFixed(2) + '%', top: ((1 - cur.median / mx) * 100).toFixed(2) + '%', width: 10, height: 10, borderRadius: '50%', background: 'var(--bg-canvas)', border: '2px solid var(--text-primary)', transform: 'translate(-50%,-50%)' }} />
             </figure>
-            <div className="mono" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-tertiary)' }}>{dayTicks(F).map((d) => <span key={d}>{d}</span>)}</div>
+            <div className="mono" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--fs-micro)', color: 'var(--text-tertiary)' }}>{dayTicks(F).map((d) => <span key={d}>{d}</span>)}</div>
           </section>
           <SelectedPoint />
         </>
@@ -71,9 +71,9 @@ export function LivePanel() {
               return (
                 <button key={p.k} className="row-btn" aria-pressed={on} disabled={!ok} onClick={() => set({ poll: p.k })}
                   style={{ display: 'grid', gridTemplateColumns: '72px minmax(0,1fr) auto', gap: 16, alignItems: 'center', minHeight: 52, padding: 0, borderBottom: '1px solid var(--border-subtle)', color: on ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
-                  <span style={{ fontSize: 15 }}>{p.label}</span>
-                  <span className="mono" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{ok ? (p.k === 'co' ? mv.toFixed(1) : Math.round(mv)) + ' ' + p.unit : f === 'unavailable' ? 'Not forecast yet' : 'Loading…'}</span>
-                  {ok ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-secondary)' }}><span className="sw" style={{ background: c.color }} />{c.name}</span> : <span />}
+                  <span style={{ fontSize: 'var(--fs-body)' }}>{p.label}</span>
+                  <span className="mono" style={{ fontSize: 'var(--fs-small)', color: 'var(--text-secondary)' }}>{ok ? (p.k === 'co' ? mv.toFixed(1) : Math.round(mv)) + ' ' + p.unit : f === 'unavailable' ? 'Not forecast yet' : 'Loading…'}</span>
+                  {ok ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 'var(--fs-small)', color: 'var(--text-secondary)' }}><span className="sw" style={{ background: c.color }} />{c.name}</span> : <span />}
                 </button>
               );
             })}
@@ -89,9 +89,9 @@ export function LivePanel() {
               <li key={e.kind + e.start} style={{ display: 'grid', gridTemplateColumns: '20px minmax(0,1fr)', gap: 14 }}>
                 <span style={{ color: SEV[e.severity], display: 'flex', paddingTop: 3 }}><Icon name={ICON[e.kind] || 'info'} size={16} /></span>
                 <div className="stack g6">
-                  <span style={{ fontSize: 16, letterSpacing: '-.01em' }}>{e.title}</span>
-                  <span style={{ fontSize: 14, lineHeight: 1.55, color: 'var(--text-secondary)' }}>{e.body}</span>
-                  <span className="mono" style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{eventWhen(e.start, e.end, F.times[0])} · {Math.round(e.probability * 100)}% likely</span>
+                  <span style={{ fontSize: 'var(--fs-h4)', letterSpacing: '-.01em' }}>{e.title}</span>
+                  <span style={{ fontSize: 'var(--fs-ui)', lineHeight: 1.55, color: 'var(--text-secondary)' }}>{e.body}</span>
+                  <span className="mono" style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>{eventWhen(e.start, e.end, F.times[0])} · {Math.round(e.probability * 100)}% likely</span>
                 </div>
               </li>
             ))}
@@ -107,7 +107,7 @@ export function LivePanel() {
             {health.map(([l, v, dot]) => (
               <div key={l} style={{ display: 'contents' }}>
                 <dt style={{ color: 'var(--text-secondary)' }}>{l}</dt>
-                <dd className="mono" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: dot }} />{v}</dd>
+                <dd className="mono" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--fs-small)' }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: dot }} />{v}</dd>
               </div>
             ))}
           </dl>
@@ -143,7 +143,7 @@ function SelectedPoint() {
           ['Estimate', <><span className="mono">~{v.val} {P.unit}</span> <span className="mono" style={{ color: 'var(--text-tertiary)' }}>({v.lo}–{v.hi})</span></>],
           ['Category', <><span style={{ width: 12, height: 12, borderRadius: 3, background: c.color }} />{c.name}</>, { display: 'flex', alignItems: 'center', gap: 10 }],
           ['Confidence', v.conf, { color: 'var(--text-secondary)' }],
-          ['Location', fmtCoords(st.pt), { fontFamily: 'var(--font-mono)', fontSize: 13, color: 'var(--text-secondary)' }],
+          ['Location', fmtCoords(st.pt), { fontFamily: 'var(--font-mono)', fontSize: 'var(--fs-small)', color: 'var(--text-secondary)' }],
         ]} />
       ) : (
         <p className="lede"><span style={{ color: 'var(--text-primary)' }}>Outside the covered area.</span> Sora's {city.name} model covers {bs}–{bn}° N, {bw}–{be}° E. Pick a point inside the hex field.</p>

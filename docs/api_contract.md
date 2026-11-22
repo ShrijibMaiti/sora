@@ -123,7 +123,7 @@ Request:
   stops: {
     name: string;                // "Home", "College", "Gym"…
     place: { label: string; lat: number; lon: number };
-    alternatives?: { label: string; lat: number; lon: number }[];  // location choice (spec §25.4)
+    alternatives?: { label: string; lat: number; lon: number; building?: Building }[];  // location choice (spec §25.4)
     arrive_after?: ISO; leave_before?: ISO; duration_min?: number;
     building: Building;
     activity?: "rest" | "light" | "moderate" | "high";
@@ -131,11 +131,13 @@ Request:
 }
 ```
 
+Errors: `invalid` (fewer than two stops), `no_feasible` (stops don't fit their windows), `not_built`.
+
 Response:
 
 ```ts
 {
-  stops: { name: string; place: string; icon: string; window: string; duration: string; building: string }[];  // display rows
+  stops: { name: string; place: string; chosen: string; icon: string; window: string; duration: string; building: string }[];  // display rows; chosen = place used in the optimized day
   original:  { segments: Segment[]; total: Band };
   optimized: { segments: Segment[]; total: Band };
   changes: { icon: string; title: string; detail: string; delta_ug: number }[];

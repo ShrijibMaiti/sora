@@ -14,7 +14,7 @@ export function WhatIfPanel() {
       <PanelHeader eyebrow="04 · What if" title="Ask before you change your plan.">
         <p className="lede">
           Based on <span style={{ color: 'var(--text-primary)' }}>{placeName(t.origin)} → {placeName(t.dest)} · {modeLabel(t.mode)} · {t.dep}</span>.{' '}
-          <button onClick={() => set({ tab: 'trip' })} style={{ border: 0, background: 'transparent', color: 'var(--brand)', fontSize: 15, padding: 0 }}>Edit trip</button>
+          <button onClick={() => set({ tab: 'trip' })} style={{ border: 0, background: 'transparent', color: 'var(--brand)', fontSize: 'var(--fs-body)', padding: 0 }}>Edit trip</button>
         </p>
       </PanelHeader>
       <section aria-label="Questions" className="sec">
@@ -41,23 +41,23 @@ export function WhatIfPanel() {
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               <span className="eyebrow">{w.q}</span>
               <span style={{
-                marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', height: 24, padding: '0 10px', borderRadius: 'var(--radius-pill)', fontSize: 12, fontWeight: 500,
+                marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', height: 24, padding: '0 10px', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-label)', fontWeight: 500,
                 background: rel ? 'var(--success-soft)' : worse ? 'var(--danger-soft)' : 'var(--surface-overlay)', color: rel ? 'var(--success)' : worse ? 'var(--danger)' : 'var(--text-secondary)',
               }}>{w.verdict}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
               <span className="big-num">{sgn(w.d.median)}%</span>
-              <span style={{ fontSize: 15, color: 'var(--text-secondary)' }}>dose</span>
-              <span className="mono" style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>({sgn(w.d.p05)} to {sgn(w.d.p95)})</span>
+              <span style={{ fontSize: 'var(--fs-body)', color: 'var(--text-secondary)' }}>dose</span>
+              <span className="mono" style={{ fontSize: 'var(--fs-small)', color: 'var(--text-tertiary)' }}>({sgn(w.d.p05)} to {sgn(w.d.p95)})</span>
             </div>
             <div className="stack" style={{ gap: 10, maxWidth: 360 }}>
               <div style={{ position: 'relative', display: 'flex' }}>
                 <Meter colors={segs(w.p, rel)} height={8} />
                 <span style={{ position: 'absolute', left: '70%', top: -4, bottom: -4, borderLeft: '1px dashed var(--text-secondary)' }} />
               </div>
-              <span style={{ fontSize: 14, color: 'var(--text-secondary)' }}>{pct} chance it helps</span>
+              <span style={{ fontSize: 'var(--fs-ui)', color: 'var(--text-secondary)' }}>{pct} chance it helps</span>
             </div>
-            <p style={{ margin: 0, fontSize: 16, lineHeight: 1.6, textWrap: 'pretty' }}>{w.reason}</p>
+            <p style={{ margin: 0, fontSize: 'var(--fs-h4)', lineHeight: 1.6, textWrap: 'pretty' }}>{w.reason}</p>
           </article>
         );
       })}

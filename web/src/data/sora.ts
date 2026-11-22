@@ -6,13 +6,14 @@ export type Band = { median: number; p05: number; p95: number };
 
 /* ---------- AQI (CPCB National AQI — fixed functional scale) ---------- */
 export type AqiCat = { k: number; name: string; color: string; ink: string; v: string };
+/** Colours are token references (tokens.css); canvas code resolves `v` with getComputedStyle. */
 export const AQI: AqiCat[] = [
-  { k: 0, name: 'Good', color: '#00B050', ink: '#0b0c0e', v: '--aqi-good' },
-  { k: 1, name: 'Satisfactory', color: '#92D050', ink: '#0b0c0e', v: '--aqi-satisfactory' },
-  { k: 2, name: 'Moderately polluted', color: '#FFFF00', ink: '#0b0c0e', v: '--aqi-moderate' },
-  { k: 3, name: 'Poor', color: '#FF9900', ink: '#0b0c0e', v: '--aqi-poor' },
-  { k: 4, name: 'Very poor', color: '#FF0000', ink: '#0b0c0e', v: '--aqi-very-poor' },
-  { k: 5, name: 'Severe', color: '#C00000', ink: '#ffffff', v: '--aqi-severe' },
+  { k: 0, name: 'Good', color: 'var(--aqi-good)', ink: 'var(--aqi-ink)', v: '--aqi-good' },
+  { k: 1, name: 'Satisfactory', color: 'var(--aqi-satisfactory)', ink: 'var(--aqi-ink)', v: '--aqi-satisfactory' },
+  { k: 2, name: 'Moderately polluted', color: 'var(--aqi-moderate)', ink: 'var(--aqi-ink)', v: '--aqi-moderate' },
+  { k: 3, name: 'Poor', color: 'var(--aqi-poor)', ink: 'var(--aqi-ink)', v: '--aqi-poor' },
+  { k: 4, name: 'Very poor', color: 'var(--aqi-very-poor)', ink: 'var(--aqi-ink)', v: '--aqi-very-poor' },
+  { k: 5, name: 'Severe', color: 'var(--aqi-severe)', ink: 'var(--aqi-ink-severe)', v: '--aqi-severe' },
 ];
 
 export type PollKey = 'pm25' | 'pm10' | 'no2' | 'o3' | 'so2' | 'co';
@@ -42,7 +43,7 @@ export const aqiIndex = (v: number) => {
   for (const [a, b, i, j] of c) if (v <= b) return Math.round(i + ((v - a) / (b - a)) * (j - i));
   return 500;
 };
-export const UNC = ['#e8f0ff', '#c3d7ff', '#9abcff', '#6e9cff', '#4a80f5', '#3066e0', '#234fbf', '#1a3a8f'];
+export const UNC = Array.from({ length: 8 }, (_, i) => `var(--unc-${i + 1})`);
 
 /* ---------- cities, stations ---------- */
 export type Bbox = [number, number, number, number]; // south, west, north, east

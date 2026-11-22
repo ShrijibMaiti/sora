@@ -72,6 +72,7 @@ const ALERTS = [
 ];
 const TABS = [['trip', 'Plan a trip'], ['day', 'Plan my day'], ['what', 'What if'], ['ins', 'Insights']];
 const COVERAGE: [string, number][] = [['Sparse', 1], ['Moderate', 2], ['Dense', 3]];
+const AQI_HEX = ['#00B050', '#92D050', '#FFFF00', '#FF9900', '#FF0000', '#C00000']; // documents the fixed CPCB values behind --aqi-*
 const AQI_RANGES = ['0–30', '31–60', '61–90', '91–120', '121–250', '250+'], AQI_IDX = [24, 78, 142, 236, 348, 432], AQI_PATS = ['·', '··', '/', '//', '×', '××'];
 const ROUTE_ROWS: [RouteId, string][] = [['plan', 'Your plan'], ['A', 'A · Lowest exposure'], ['B', 'B · Balanced (selected)'], ['C', 'C · Fastest']];
 const POLL_VALS: Record<string, number> = { pm25: 142, pm10: 254, no2: 86, o3: 38, so2: 14, co: 2.1 };
@@ -207,7 +208,7 @@ export default function Styleguide() {
                 {AQI.map((a, i) => (
                   <div key={a.k} style={s('display:flex;flex-direction:column;gap:6px')}>
                     <div style={s(`height:44px;border-radius:var(--radius-md);background:${a.color};color:${a.ink};display:flex;align-items:flex-end;justify-content:space-between;padding:6px 8px;font-size:12px;font-weight:500`)}><span>{a.name}</span><span style={s('font-family:var(--font-mono)')}>{AQI_PATS[i]}</span></div>
-                    <span style={s('font-family:var(--font-mono);font-size:11px;color:var(--text-secondary)')}>{a.color} · PM2.5 {AQI_RANGES[i]}</span>
+                    <span style={s('font-family:var(--font-mono);font-size:11px;color:var(--text-secondary)')}>{AQI_HEX[i]} · PM2.5 {AQI_RANGES[i]}</span>
                   </div>
                 ))}
               </div>

@@ -41,7 +41,7 @@ const opt = (o: WireOption): TripOption => ({ ...o, departure: istHHMM(o.departu
 const seg = (s: Segment): DaySeg => ({ me: s.me, a: istMinutes(s.start), b: istMinutes(s.end), dose: s.dose, label: s.label });
 
 export type DayView = {
-  stops: { name: string; place: string; icon: string; window: string; dur: string; bld: string }[];
+  stops: { name: string; place: string; chosen: string; icon: string; window: string; dur: string; bld: string }[];
   original: DaySeg[]; optimized: DaySeg[];
   changes: { icon: string; title: string; detail: string; delta: string }[];
   total: { orig: DayResponse['original']['total']; opt: DayResponse['optimized']['total']; red: DayResponse['reduction_pct']; p: number; extra: number };
@@ -59,7 +59,7 @@ export const api = {
   async day(body: DayRequest): Promise<DayView> {
     const r = await raw.day(body);
     return {
-      stops: r.stops.map((s) => ({ name: s.name, place: s.place, icon: s.icon, window: s.window, dur: s.duration, bld: s.building })),
+      stops: r.stops.map((s) => ({ name: s.name, place: s.place, chosen: s.chosen, icon: s.icon, window: s.window, dur: s.duration, bld: s.building })),
       original: r.original.segments.map(seg), optimized: r.optimized.segments.map(seg),
       changes: r.changes.map((c) => ({ icon: c.icon, title: c.title, detail: c.detail, delta: (c.delta_ug < 0 ? '−' : '+') + Math.abs(c.delta_ug) + ' µg' })),
       total: { orig: r.original.total, opt: r.optimized.total, red: r.reduction_pct, p: r.p_better, extra: r.extra_min },

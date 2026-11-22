@@ -54,7 +54,7 @@ export function Rail({ L }: { L: Layout }) {
       </div>
       <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
         <button className="icon-btn muted" onClick={toggleTheme} aria-label={themeLabel} title={themeLabel}><Icon name={st.theme === 'dark' ? 'sun' : 'moon'} size={18} /></button>
-        <button className="avatar" onClick={() => set((s) => ({ menuOpen: !s.menuOpen, cityOpen: false }))} aria-haspopup="menu" aria-expanded={st.menuOpen} aria-label="Settings and profile">AK</button>
+        <button className="avatar" onClick={() => set((s) => ({ menuOpen: !s.menuOpen, cityOpen: false }))} aria-haspopup="menu" aria-expanded={st.menuOpen} aria-label="Settings and profile"><Icon name="user" size={17} /></button>
       </div>
     </nav>
   );
@@ -83,15 +83,18 @@ export function Select<T extends string>({ value, onChange, options, className =
   );
 }
 
+/** Preview states and the styleguide link are for development and design review only. */
+const DEV_TOOLS = import.meta.env.DEV || new URLSearchParams(location.search).has('preview');
+
 export function ProfileMenu({ L }: { L: Layout }) {
-  const { st, set, applyDemo, toggleTheme } = useSora();
+  const { st, set, applyDemo, toggleTheme, clearHistory } = useSora();
   if (!st.menuOpen) return null;
   const themeLabel = st.theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
   return (
     <div role="menu" className="menu popover" style={L.menuPos}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <span style={{ width: 36, height: 36, borderRadius: 'var(--radius-md)', background: 'var(--surface-raised)', border: '1px solid var(--border-default)', display: 'grid', placeItems: 'center', fontWeight: 500 }}>AK</span>
-        <span className="stack"><span style={{ fontSize: 13, fontWeight: 500 }}>Aanya Kapoor</span><span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>Routine stored on this device</span></span>
+        <span style={{ width: 36, height: 36, borderRadius: 'var(--radius-md)', background: 'var(--surface-raised)', border: '1px solid var(--border-default)', display: 'grid', placeItems: 'center', color: 'var(--text-secondary)' }}><Icon name="user" size={18} /></span>
+        <span className="stack"><span style={{ fontSize: 'var(--fs-small)', fontWeight: 500 }}>This device</span><span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-tertiary)' }}>No account · your routine stays here</span></span>
       </div>
       <div className="menu-sec">
         <span className="menu-cap">Preferences</span>
@@ -101,24 +104,27 @@ export function ProfileMenu({ L }: { L: Layout }) {
         <label className="pref-row">Home building
           <Select<BuildingKey> value={st.prefs.bld} options={BUILDINGS} onChange={(v) => set((s) => ({ prefs: { ...s.prefs, bld: v } }))} />
         </label>
-        <label className="stack" style={{ gap: 4, fontSize: 13 }}>
+        <label className="stack" style={{ gap: 4, fontSize: 'var(--fs-small)' }}>
           <span style={{ display: 'flex', justifyContent: 'space-between' }}>Extra minutes I'll accept<span className="mono">{st.prefs.extra} min</span></span>
           <input type="range" min={0} max={30} step={1} value={st.prefs.extra} onChange={(e) => set((s) => ({ prefs: { ...s.prefs, extra: +e.target.value } }))} style={{ width: '100%', accentColor: 'var(--brand)' }} />
         </label>
       </div>
       <div className="menu-sec tight">
-        <span className="menu-cap" style={{ marginBottom: 4 }}>Preview states</span>
-        {DEMOS.map(([k, l, i]) => (
-          <button key={k} role="menuitemradio" aria-checked={st.demo === k} className="menu-item" onClick={() => applyDemo(k)}>
-            <Icon name={i} size={15} /><span style={{ flex: 1 }}>{l}</span>{st.demo === k && <Icon name="check" size={14} />}
-          </button>
-        ))}
-      </div>
-      <div className="menu-sec tight">
         <button className="menu-item" onClick={toggleTheme}><Icon name={st.theme === 'dark' ? 'sun' : 'moon'} size={15} />{themeLabel}</button>
         <button className="menu-item" onClick={() => set({ onb: 0, menuOpen: false })}><Icon name="rotate-ccw" size={15} />Replay onboarding</button>
-        <a className="menu-item" href="/styleguide"><Icon name="palette" size={15} />Styleguide</a>
+        <button className="menu-item" onClick={clearHistory}><Icon name="trash-2" size={15} />Delete history on this device</button>
       </div>
+      {DEV_TOOLS && (
+        <div className="menu-sec tight">
+          <span className="menu-cap" style={{ marginBottom: 4 }}>Preview states · dev only</span>
+          {DEMOS.map(([k, l, i]) => (
+            <button key={k} role="menuitemradio" aria-checked={st.demo === k} className="menu-item" onClick={() => applyDemo(k)}>
+              <Icon name={i} size={15} /><span style={{ flex: 1 }}>{l}</span>{st.demo === k && <Icon name="check" size={14} />}
+            </button>
+          ))}
+          <a className="menu-item" href="/styleguide"><Icon name="palette" size={15} />Styleguide</a>
+        </div>
+      )}
     </div>
   );
 }

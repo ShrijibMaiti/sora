@@ -17,7 +17,8 @@ const FAQ: [string, string][] = [
 const LAYERS: [string, string][] = [['Forecast', "The city's air, 0–72 h ahead."], ['Follow', 'Your route, vehicle and rooms.'], ['Recommend', 'A lower dose, and how sure.']];
 const OPS = [
   { t: 'Forecast', h: 'A physics-constrained forecast of the whole city, every hour.', p: 'A neural operator reconstructs the pollution field from stations, satellite and weather, then forecasts 72 hours ahead. A street-level layer adds what happens at the roadside.', facts: [['Horizon', '0–72 h, hourly'], ['Resolution', 'City grid + street layer'], ['Tested', 'On a city the model never saw']] },
-  { t: 'Follow', h: 'Your day, stretch by stretch, room by room.', p: 'Sora follows your trajectory through roads, vehicles and buildings. Each has its own air: an open auto, a sealed metro coach, a naturally ventilated gym.', facts: [['Modes', 'Walk to metro, 7 in all'], ['Indoors', '3 building types'], ['Breathing', 'Varies by activity']] },
+  { t: 'Follow', h: 'Your day, stretch by stretch, room by room.', p: 'Sora follows your trajectory through roads, vehicles and buildings. Each has its own air: an open auto, a sealed metro coach, a naturally ventilated gym.', facts: [['Modes', 'Walk to metro, 7 in all'], ['Indoors', '3 building types'], ['Timeline', 'Minute by minute']] },
+  { t: 'Estimate', h: 'Your dose, as a range. Not a single number.', p: "Concentration × breathing rate × time, added up along your day. The forecast's uncertainty is carried into the dose, so you see how high it could be, not only a best guess.", facts: [['Unit', 'µg of PM2.5 inhaled'], ['Range', '90% interval'], ['Breathing', 'Varies by activity']] },
   { t: 'Recommend', h: 'Options with a benefit, a cost and a confidence.', p: "Uncertainty is propagated from the field into your dose, so every suggestion says how likely it is to really beat your own plan. Below 70%, Sora says the options aren't reliably different.", facts: [['Benefit', '% lower dose, with range'], ['Cost', 'Extra minutes'], ['Confidence', 'p(better than your plan)']] },
 ];
 const SEAMS = [
@@ -26,6 +27,15 @@ const SEAMS = [
   { n: '03', t: 'Change one thing. Keep the same estimate.', d: 'Leave earlier, switch to the metro, choose the other gym. Each change updates the same estimate, with its range and confidence.' },
 ];
 const CODE: Record<string, string> = { delhi: 'del', kolkata: 'ccu', mumbai: 'bom', chennai: 'maa' };
+/* What the model has to get right in each city (spec §3.3, dominant physics) — complements the note, doesn't repeat it. */
+const TRAITS: Record<string, string> = {
+  delhi: 'Model focus: night-time mixing height, long-range smoke transport, dust',
+  kolkata: 'Model focus: pollution flowing in from upwind, with few stations to check against',
+  mumbai: 'Model focus: winds that reverse at the coast, sea-salt particles',
+  chennai: 'Model focus: sea breeze, rain washing the air out in winter',
+};
+const STAYS = ['GPS traces', 'Your usual routes and departure times', 'Places you label: home, college, gym', 'Exposure history and trends'];
+const SENT = ['Start and destination', 'Departure window and latest arrival', 'Mode and building types'];
 const MONO = { fontFamily: 'var(--font-mono)' } as const;
 
 /* ---------- exploded-layer diagram geometry (computed once) ---------- */
@@ -77,6 +87,16 @@ const TR = (() => {
   DAY.original.forEach((s) => (tot[s.me] = (tot[s.me] || 0) + s.dose));
   const sum = Object.values(tot).reduce((a, b) => a + b, 0);
   return { total: sum.toLocaleString('en-IN'), me: ME.filter((m) => tot[m.k]).map((m) => ({ k: m.k, label: m.label, pct: Math.round((tot[m.k] / sum) * 100) + '%' })) };
+})();
+
+/* Estimate step: the sample day's total dose and its three largest contributions. */
+const EST = (() => {
+  const t = DAY.total.orig, fmt = (n: number) => n.toLocaleString('en-IN'), top = DAY.original.slice().sort((a, b) => b.dose - a.dose).slice(0, 3);
+  const scale = t.p95 * 1.12, pct = (n: number) => ((n / scale) * 100).toFixed(1) + '%';
+  return {
+    med: fmt(t.median), lo: fmt(t.p05), hi: fmt(t.p95), bandL: pct(t.p05), bandW: pct(t.p95 - t.p05), tick: pct(t.median),
+    top: top.map((s) => ({ key: s.me + s.a, label: s.label ? `${ME.find((m) => m.k === s.me)!.label} · ${s.label}` : ME.find((m) => m.k === s.me)!.label, when: `${hhmm(s.a)}–${hhmm(s.b)}`, dose: s.dose, w: ((s.dose / top[0].dose) * 100).toFixed(0) + '%' })),
+  };
 })();
 
 const REC = (() => {
@@ -146,10 +166,10 @@ export default function Landing() {
 
       <header className={'lp-header' + (scrolled || menu ? ' solid' : '')}>
         <div className="lp-wrap" style={{ height: 64, display: 'flex', alignItems: 'center', gap: 32 }}>
-          <a href="#main" className="lp-brand"><span style={{ color: 'var(--brand)', display: 'flex' }}><Icon name="hexmark" size={20} /></span><span className="word" style={{ fontSize: 18 }}>sora</span></a>
+          <a href="#main" className="lp-brand"><span style={{ color: 'var(--brand)', display: 'flex' }}><Icon name="hexmark" size={20} /></span><span className="word" style={{ fontSize: 'var(--fs-lede)' }}>sora</span></a>
           {wide && (
             <nav aria-label="Main" className="lp-nav" style={{ display: 'flex', gap: 28 }}>
-              <a href="#model">The model</a><a href="#operations">How it works</a><a href="#questions">Questions</a>
+              <a href="#model">The model</a><a href="#operations">How it works</a><a href="#cities">Cities</a><a href="#questions">Questions</a>
             </nav>
           )}
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -166,6 +186,8 @@ export default function Landing() {
           <nav aria-label="Mobile" className="lp-wrap lp-mnav" style={{ borderTop: '1px solid var(--border-default)', paddingTop: 8, paddingBottom: 16, display: 'flex', flexDirection: 'column', background: 'var(--bg-canvas)', maxWidth: 'none' }}>
             <a href="#model" onClick={() => setMenu(false)}>The model</a>
             <a href="#operations" onClick={() => setMenu(false)}>How it works</a>
+            <a href="#cities" onClick={() => setMenu(false)}>Cities</a>
+            <a href="#privacy" onClick={() => setMenu(false)}>Privacy</a>
             <a href="#questions" onClick={() => setMenu(false)}>Questions</a>
             <a href="https://github.com/ShrijibMaiti/sora" style={{ color: 'var(--text-secondary)', borderBottom: 0 }}>GitHub</a>
           </nav>
@@ -187,12 +209,12 @@ export default function Landing() {
                 <a href={APP_URL} className="lp-btn-brand">Launch Sora<Icon name="arrow-right" size={16} /></a>
                 <a href="#operations" className="lp-btn-line">See how it works</a>
               </div>
-              <p style={{ margin: 0, fontSize: 14, color: 'var(--text-tertiary)' }}>Estimates, not medical advice.</p>
+              <p style={{ margin: 0, fontSize: 'var(--fs-ui)', color: 'var(--text-tertiary)' }}>Estimates, not medical advice.</p>
             </div>
 
             <figure style={{ margin: 0, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 16 }}
               aria-label="Exploded diagram of three stacked layers. Bottom: Delhi PM2.5 forecast at 19:00 as hexagons coloured by AQI category. Middle: your planned trip from Saket to Connaught Place. Top: the hexes your recommended route passes through, and route B with 28% lower estimated dose for 7 extra minutes.">
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', ...MONO, fontSize: 12, color: 'var(--text-tertiary)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', ...MONO, fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>
                 <code style={{ ...MONO, color: 'var(--text-secondary)' }}>delhi / saket → connaught-place</code>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success)' }} />One connected estimate</span>
               </div>
@@ -238,12 +260,12 @@ export default function Landing() {
               <div role="tablist" aria-label="Inspect a layer" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
                 {LAYERS.map(([t, d], i) => (
                   <button key={t} role="tab" className="lp-layer" aria-selected={layer === i} onClick={() => setLayer(i)}>
-                    <span style={{ fontSize: 15, fontWeight: 500 }}>{t}</span>
-                    <span style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.35 }}>{d}</span>
+                    <span style={{ fontSize: 'var(--fs-body)', fontWeight: 500 }}>{t}</span>
+                    <span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-secondary)', lineHeight: 1.35 }}>{d}</span>
                   </button>
                 ))}
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12, color: 'var(--text-tertiary)', fontStyle: 'italic' }}><span>Inspect a layer above</span><span>Illustrative model · Saturday 19:00 forecast</span></div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)', fontStyle: 'italic' }}><span>Inspect a layer above</span><span>Illustrative model · Saturday 19:00 forecast</span></div>
             </figure>
           </div>
           <p style={{ margin: 'clamp(56px,7vw,96px) 0 0', paddingTop: 24, borderTop: '1px solid var(--border-default)', fontSize: 'clamp(18px,1.8vw,22px)', color: 'var(--text-secondary)' }}>
@@ -261,13 +283,13 @@ export default function Landing() {
           <div style={{ display: 'grid', gridTemplateColumns: twoCols, border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', overflow: 'hidden', background: 'var(--surface-base)' }}>
             <div style={{ display: 'flex', flexDirection: 'column', borderRight: stack ? 0 : '1px solid var(--border-default)', borderBottom: stack ? '1px solid var(--border-default)' : 0, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 20px', borderBottom: '1px solid var(--border-default)' }}>
-                <span style={{ ...MONO, fontSize: 13 }}>plan.sora</span>
-                <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Interactive example · illustrative syntax</span>
-                <button onClick={copy} className="lp-hov" style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)', background: 'transparent', fontSize: 12 }}>
+                <span style={{ ...MONO, fontSize: 'var(--fs-small)' }}>plan.sora</span>
+                <span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>Interactive example · illustrative syntax</span>
+                <button onClick={copy} className="lp-hov" style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, height: 32, padding: '0 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-default)', background: 'transparent', fontSize: 'var(--fs-label)' }}>
                   <Icon name={copied ? 'check' : 'copy'} size={13} />{copied ? 'Copied' : 'Copy'}
                 </button>
               </div>
-              <div style={{ padding: '8px 20px 0', fontSize: 13, color: 'var(--text-tertiary)' }}>A plan, not a pollution map.</div>
+              <div style={{ padding: '8px 20px 0', fontSize: 'var(--fs-small)', color: 'var(--text-tertiary)' }}>A plan, not a pollution map.</div>
               <pre style={{ margin: 0, padding: '16px 20px 28px', ...MONO, fontSize: 'clamp(13px,1.2vw,15px)', lineHeight: 1.75, overflowX: 'auto', color: 'var(--text-secondary)' }}><code ref={codeRef}>
                 <span style={{ color: 'var(--text-tertiary)' }}>plan</span> <span style={{ color: 'var(--text-primary)' }}>"evening-commute"</span> {'{'}{'\n'}
                 {'  from    = '}<span style={{ color: 'var(--text-primary)' }}>"saket"</span>{'\n'}
@@ -285,72 +307,72 @@ export default function Landing() {
 
             <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
               <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border-default)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 15, fontWeight: 500 }}>One plan. Four options.</span><span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-tertiary)' }}>Preview</span>
+                <span style={{ fontSize: 'var(--fs-body)', fontWeight: 500 }}>One plan. Four options.</span><span style={{ marginLeft: 'auto', fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>Preview</span>
               </div>
               <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 20, flex: 1 }}>
                 <fieldset style={{ border: 0, margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <legend style={{ fontSize: 13, fontWeight: 500, marginBottom: 10, padding: 0 }}>Select a city</legend>
+                  <legend style={{ fontSize: 'var(--fs-small)', fontWeight: 500, marginBottom: 10, padding: 0 }}>Select a city</legend>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', gap: 8 }}>
                     {CITIES.map((x) => (
                       <button key={x.key} className="lp-chip" aria-pressed={city === x.key} onClick={() => setCity(x.key)}
                         style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, padding: '10px 12px', minHeight: 56, borderRadius: 'var(--radius-md)', textAlign: 'left' }}>
-                        <code style={{ ...MONO, fontSize: 13, color: city === x.key ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{CODE[x.key]}</code>
-                        <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{x.name} · {x.status}</span>
+                        <code style={{ ...MONO, fontSize: 'var(--fs-small)', color: city === x.key ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{CODE[x.key]}</code>
+                        <span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-secondary)' }}>{x.name} · {x.status}</span>
                       </button>
                     ))}
                   </div>
                 </fieldset>
                 <fieldset style={{ border: 0, margin: 0, padding: 0 }}>
-                  <legend style={{ fontSize: 13, fontWeight: 500, marginBottom: 10, padding: 0 }}>Mode</legend>
+                  <legend style={{ fontSize: 'var(--fs-small)', fontWeight: 500, marginBottom: 10, padding: 0 }}>Mode</legend>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                     {MODES.filter((m) => ['walk', 'cycle', 'auto', 'car_ac', 'metro'].includes(m.k)).map((m) => (
                       <button key={m.k} className="lp-chip" aria-pressed={mode === m.k} onClick={() => setMode(m.k)}
-                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 40, padding: '0 12px', borderRadius: 'var(--radius-pill)', fontSize: 13 }}>
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, height: 40, padding: '0 12px', borderRadius: 'var(--radius-pill)', fontSize: 'var(--fs-small)' }}>
                         <Icon name={m.icon} size={15} />{m.label.replace(' (AC)', ' · AC')}
                       </button>
                     ))}
                   </div>
                 </fieldset>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: 13, fontWeight: 500 }}>Leave at</span>
+                  <span style={{ fontSize: 'var(--fs-small)', fontWeight: 500 }}>Leave at</span>
                   <div style={{ display: 'inline-flex', alignItems: 'center', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-pill)', overflow: 'hidden' }}>
                     <button className="lp-hov" onClick={() => setDep(Math.max(960, dep - 15))} aria-label="Leave 15 minutes earlier" style={{ width: 44, height: 40, border: 0, background: 'transparent', display: 'grid', placeItems: 'center' }}><Icon name="minus" size={15} /></button>
-                    <span aria-live="polite" style={{ minWidth: 84, textAlign: 'center', ...MONO, fontSize: 14 }}>{leave} IST</span>
+                    <span aria-live="polite" style={{ minWidth: 84, textAlign: 'center', ...MONO, fontSize: 'var(--fs-ui)' }}>{leave} IST</span>
                     <button className="lp-hov" onClick={() => setDep(Math.min(1260, dep + 15))} aria-label="Leave 15 minutes later" style={{ width: 44, height: 40, border: 0, background: 'transparent', display: 'grid', placeItems: 'center' }}><Icon name="plus" size={15} /></button>
                   </div>
                 </div>
 
                 <div aria-live="polite" style={{ marginTop: 'auto', borderTop: '1px solid var(--border-default)', paddingTop: 18, display: 'flex', flexDirection: 'column', gap: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{out ? out.head : `${c.name} · Preview`}</span>
-                    <span style={{ ...MONO, fontSize: 12, color: 'var(--text-tertiary)' }}>{out ? out.sub : 'no advice yet'}</span>
+                    <span style={{ fontSize: 'var(--fs-small)', color: 'var(--text-secondary)' }}>{out ? out.head : `${c.name} · Preview`}</span>
+                    <span style={{ ...MONO, fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>{out ? out.sub : 'no advice yet'}</span>
                   </div>
                   {out ? (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
                         <span style={{ fontSize: 'clamp(40px,4.4vw,56px)', fontWeight: 300, lineHeight: 1, letterSpacing: '-.02em' }}>{out.red}</span>
-                        <span style={{ ...MONO, fontSize: 13, color: 'var(--text-tertiary)' }}>{out.range}</span>
-                        <span style={{ marginLeft: 'auto', ...MONO, fontSize: 13, display: 'inline-flex', gap: 6, alignItems: 'center' }}><Icon name="clock" size={13} />{out.extra}</span>
+                        <span style={{ ...MONO, fontSize: 'var(--fs-small)', color: 'var(--text-tertiary)' }}>{out.range}</span>
+                        <span style={{ marginLeft: 'auto', ...MONO, fontSize: 'var(--fs-small)', display: 'inline-flex', gap: 6, alignItems: 'center' }}><Icon name="clock" size={13} />{out.extra}</span>
                       </div>
                       <div aria-hidden="true" style={{ position: 'relative', display: 'flex', gap: 2, height: 10 }}>
                         {out.segs.map((s, i) => <span key={i} style={{ flex: 1, borderRadius: 1, background: s }} />)}
                         <span style={{ position: 'absolute', left: '70%', top: -3, bottom: -3, borderLeft: '1px dashed var(--text-secondary)' }} />
                       </div>
-                      <span style={{ fontSize: 14 }}>{out.conf}</span>
-                      <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{out.why}</span>
+                      <span style={{ fontSize: 'var(--fs-ui)' }}>{out.conf}</span>
+                      <span style={{ fontSize: 'var(--fs-small)', color: 'var(--text-secondary)' }}>{out.why}</span>
                     </div>
                   ) : (
-                    <p style={{ margin: 0, fontSize: 14, color: 'var(--text-secondary)' }}>{c.note} The model is still being validated here, so Sora shows the forecast but no advice yet.</p>
+                    <p style={{ margin: 0, fontSize: 'var(--fs-ui)', color: 'var(--text-secondary)' }}>{c.note} The model is still being validated here, so Sora shows the forecast but no advice yet.</p>
                   )}
                 </div>
               </div>
               <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border-default)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 13, color: 'var(--text-secondary)', flex: 1, minWidth: 200 }}>Change the plan. Inspect the result.</span>
-                <a href={APP_URL + '#tab=trip'} className="lp-btn-ink" style={{ fontSize: 13 }}>Open in Sora<Icon name="arrow-up-right" size={14} /></a>
+                <span style={{ fontSize: 'var(--fs-small)', color: 'var(--text-secondary)', flex: 1, minWidth: 200 }}>Change the plan. Inspect the result.</span>
+                <a href={APP_URL + '#tab=trip'} className="lp-btn-ink" style={{ fontSize: 'var(--fs-small)' }}>Open in Sora<Icon name="arrow-up-right" size={14} /></a>
               </div>
             </div>
           </div>
-          <p style={{ margin: 0, fontSize: 13, color: 'var(--text-tertiary)', maxWidth: 720 }}>This example runs in your browser on Sora's illustrative Delhi forecast. Syntax and numbers show the model, not a live plan. No account. No location shared.</p>
+          <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--text-tertiary)', maxWidth: 720 }}>This example runs in your browser on Sora's illustrative Delhi forecast. Syntax and numbers show the model, not a live plan. No account. No location shared.</p>
         </section>
 
         {/* ---------- fewer guesses ---------- */}
@@ -358,15 +380,15 @@ export default function Landing() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 20, alignSelf: 'start', position: stack ? 'static' : 'sticky', top: 96 }}>
             <h2 id="seams-h" className="lp-h2">Fewer guesses. Clearer choices.</h2>
             <p className="lp-lede" style={{ maxWidth: 460 }}>Exposure gets lost at the boundaries — between the map, your route, your vehicle and the room you end up in. Sora keeps them in one estimate.</p>
-            <a href="#model" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 15, fontWeight: 500, minHeight: 44 }}>Inspect the plan model<Icon name="arrow-right" size={15} /></a>
+            <a href="#model" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontSize: 'var(--fs-body)', fontWeight: 500, minHeight: 44 }}>Inspect the plan model<Icon name="arrow-right" size={15} /></a>
           </div>
           <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column' }}>
             {SEAMS.map((s) => (
               <li key={s.n} style={{ display: 'grid', gridTemplateColumns: '48px minmax(0,1fr)', gap: 16, padding: '32px 0', borderTop: '1px solid var(--border-default)' }}>
-                <span style={{ ...MONO, fontSize: 13, color: 'var(--brand)', paddingTop: 6 }}>{s.n}</span>
+                <span style={{ ...MONO, fontSize: 'var(--fs-small)', color: 'var(--brand)', paddingTop: 6 }}>{s.n}</span>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <h3 style={{ margin: 0, fontSize: 'clamp(22px,2.2vw,28px)', fontWeight: 400, letterSpacing: '-.02em' }}>{s.t}</h3>
-                  <p style={{ margin: 0, fontSize: 16, color: 'var(--text-secondary)', textWrap: 'pretty' }}>{s.d}</p>
+                  <p style={{ margin: 0, fontSize: 'var(--fs-h4)', color: 'var(--text-secondary)', textWrap: 'pretty' }}>{s.d}</p>
                 </div>
               </li>
             ))}
@@ -376,7 +398,7 @@ export default function Landing() {
         {/* ---------- three steps ---------- */}
         <section id="operations" aria-labelledby="ops-h" className="lp-wrap lp-sec" style={{ display: 'flex', flexDirection: 'column', gap: 40 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 760 }}>
-            <h2 id="ops-h" className="lp-h2">Three steps. One estimate.</h2>
+            <h2 id="ops-h" className="lp-h2">Four steps. One estimate.</h2>
             <p className="lp-lede">Your plan should be organised around what you breathe. Not around the maps you had to read to guess it.</p>
           </div>
           <div role="tablist" aria-label="Steps" className="noscroll" style={{ display: 'flex', borderBottom: '1px solid var(--border-default)', gap: 'clamp(16px,3vw,40px)', overflowX: 'auto' }}>
@@ -387,12 +409,12 @@ export default function Landing() {
           <div role="tabpanel" style={{ display: 'grid', gridTemplateColumns: twoCols, gap: 'clamp(32px,5vw,80px)', alignItems: 'center' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               <h3 style={{ margin: 0, fontSize: 'clamp(24px,2.6vw,34px)', fontWeight: 400, letterSpacing: '-.025em', lineHeight: 1.15, textWrap: 'balance' }}>{O.h}</h3>
-              <p style={{ margin: 0, fontSize: 17, color: 'var(--text-secondary)', textWrap: 'pretty' }}>{O.p}</p>
+              <p style={{ margin: 0, fontSize: 'var(--fs-lead)', color: 'var(--text-secondary)', textWrap: 'pretty' }}>{O.p}</p>
               <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '10px 24px', paddingTop: 20, borderTop: '1px solid var(--border-default)' }}>
                 {O.facts.map(([k, v]) => (
                   <div key={k} style={{ display: 'contents' }}>
-                    <dt style={{ ...MONO, fontSize: 12, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '.06em', paddingTop: 3 }}>{k}</dt>
-                    <dd style={{ margin: 0, fontSize: 15 }}>{v}</dd>
+                    <dt style={{ ...MONO, fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '.06em', paddingTop: 3 }}>{k}</dt>
+                    <dd style={{ margin: 0, fontSize: 'var(--fs-body)' }}>{v}</dd>
                   </div>
                 ))}
               </dl>
@@ -400,33 +422,58 @@ export default function Landing() {
             <div style={{ background: 'var(--surface-base)', border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', padding: 20, minWidth: 0 }}>
               {op === 0 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-tertiary)', ...MONO }}><span>CITY MEAN PM2.5 · 0–72 H</span><span>µg/m³</span></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)', ...MONO }}><span>CITY MEAN PM2.5 · 0–72 H</span><span>µg/m³</span></div>
                   <svg viewBox="0 0 480 180" role="img" aria-label="City mean PM2.5 over 72 hours with 90% band; peaks each evening around 20:00." style={{ width: '100%', height: 'auto' }}>
                     <path d={FC.band} fill="var(--brand-soft)" />
                     <path d={FC.line} fill="none" stroke="var(--brand)" strokeWidth="1.8" style={{ filter: 'drop-shadow(0 0 6px var(--brand-line))' }} />
                     {FC.days.map((x) => <line key={x} x1={x} x2={x} y1="0" y2="170" stroke="var(--border-strong)" strokeDasharray="2 4" />)}
                   </svg>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', ...MONO, fontSize: 11, color: 'var(--text-tertiary)' }}><span>Sat 14:00</span><span>Sun</span><span>Mon</span><span>Tue 14:00</span></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', ...MONO, fontSize: 'var(--fs-micro)', color: 'var(--text-tertiary)' }}><span>Sat 14:00</span><span>Sun</span><span>Mon</span><span>Tue 14:00</span></div>
                 </div>
               )}
               {op === 1 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: 'var(--text-tertiary)', ...MONO }}><span>YOUR DAY · 07:00–23:00</span><span>{TR.total} µg</span></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)', ...MONO }}><span>YOUR DAY · 07:00–23:00</span><span>{TR.total} µg</span></div>
                   <div style={{ display: 'flex', height: 36, borderRadius: 6, overflow: 'hidden', gap: 2 }}>
                     {DAY.original.map((s, i) => <span key={i} title={`${hhmm(s.a)}–${hhmm(s.b)} · ${s.dose} µg`} style={{ flex: s.b - s.a, background: `var(--me-${s.me})` }} />)}
                   </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', ...MONO, fontSize: 11, color: 'var(--text-tertiary)' }}><span>07:00</span><span>11:00</span><span>15:00</span><span>19:00</span><span>23:00</span></div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', ...MONO, fontSize: 'var(--fs-micro)', color: 'var(--text-tertiary)' }}><span>07:00</span><span>11:00</span><span>15:00</span><span>19:00</span><span>23:00</span></div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: '8px 16px', paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
                     {TR.me.map((m) => (
-                      <span key={m.k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
+                      <span key={m.k} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--fs-small)' }}>
                         <span style={{ width: 10, height: 10, borderRadius: 2, background: `var(--me-${m.k})` }} />
-                        <span style={{ flex: 1, color: 'var(--text-secondary)' }}>{m.label}</span><span style={{ ...MONO, fontSize: 12 }}>{m.pct}</span>
+                        <span style={{ flex: 1, color: 'var(--text-secondary)' }}>{m.label}</span><span style={{ ...MONO, fontSize: 'var(--fs-label)' }}>{m.pct}</span>
                       </span>
                     ))}
                   </div>
                 </div>
               )}
               {op === 2 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)', ...MONO }}><span>YOUR DAY · PM2.5 DOSE</span><span>90% RANGE</span></div>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 'clamp(40px,4.4vw,56px)', fontWeight: 300, lineHeight: 1, letterSpacing: '-.02em', fontVariantNumeric: 'tabular-nums' }}>{EST.med}</span>
+                    <span style={{ fontSize: 'var(--fs-ui)', color: 'var(--text-secondary)' }}>µg</span>
+                    <span style={{ ...MONO, fontSize: 'var(--fs-small)', color: 'var(--text-tertiary)' }}>({EST.lo}–{EST.hi})</span>
+                  </div>
+                  <div role="img" aria-label={`Estimated dose ${EST.med} µg, 90% range ${EST.lo} to ${EST.hi}`} style={{ position: 'relative', height: 14 }}>
+                    <span style={{ position: 'absolute', left: 0, right: 0, top: 6, height: 2, background: 'var(--border-default)' }} />
+                    <span style={{ position: 'absolute', left: EST.bandL, width: EST.bandW, top: 3, height: 8, borderRadius: 4, background: 'var(--brand-soft)', border: '1px solid var(--brand-line)' }} />
+                    <span style={{ position: 'absolute', left: EST.tick, top: 0, width: 2, height: 14, background: 'var(--text-primary)' }} />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', paddingTop: 12, borderTop: '1px solid var(--border-subtle)' }}>
+                    <span style={{ fontSize: 'var(--fs-small)', color: 'var(--text-secondary)', paddingBottom: 6 }}>Largest contributions</span>
+                    {EST.top.map((s) => (
+                      <div key={s.key} style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: '6px 12px', padding: '10px 0', borderBottom: '1px solid var(--border-subtle)' }}>
+                        <span style={{ fontSize: 'var(--fs-ui)' }}>{s.label} <span style={{ ...MONO, fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>{s.when}</span></span>
+                        <span style={{ ...MONO, fontSize: 'var(--fs-small)' }}>{s.dose} µg</span>
+                        <span aria-hidden="true" style={{ gridColumn: '1 / -1', height: 4, borderRadius: 2, background: 'var(--surface-overlay)' }}><span style={{ display: 'block', width: s.w, height: '100%', borderRadius: 2, background: 'var(--text-tertiary)' }} /></span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {op === 3 && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {REC.map((o) => {
                     const R = ROUTE[o.id];
@@ -434,10 +481,10 @@ export default function Landing() {
                       <div key={o.id} style={{ display: 'grid', gridTemplateColumns: '28px minmax(0,1fr) auto', gap: 12, alignItems: 'center', padding: '12px 0', borderBottom: '1px solid var(--border-subtle)' }}>
                         <svg width="28" height="10" aria-hidden="true"><line x1="2" y1="5" x2="26" y2="5" stroke={routeColor(o.id)} strokeWidth={R.w} strokeDasharray={R.dash || undefined} strokeLinecap="round" /></svg>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-                          <span style={{ fontSize: 14 }}>{o.letter} · {o.label}</span>
+                          <span style={{ fontSize: 'var(--fs-ui)' }}>{o.letter} · {o.label}</span>
                           <span style={{ display: 'flex', gap: 1, height: 5, maxWidth: 200 }}>{o.segs.map((s, i) => <span key={i} style={{ flex: 1, background: s }} />)}</span>
                         </div>
-                        <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', ...MONO, fontSize: 12 }}>
+                        <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', ...MONO, fontSize: 'var(--fs-label)' }}>
                           <span>{o.dose.median} µg <span style={{ color: 'var(--text-tertiary)' }}>({o.dose.p05}–{o.dose.p95})</span></span>
                           <span style={{ color: 'var(--text-tertiary)' }}>{o.pTxt} · {o.extraTxt}</span>
                         </span>
@@ -448,7 +495,57 @@ export default function Landing() {
               )}
             </div>
           </div>
-          <p style={{ margin: 0, fontSize: 13, color: 'var(--text-tertiary)' }}>Estimates, not measurements. Lower exposure doesn't mean safe.</p>
+          <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--text-tertiary)' }}>Estimates, not measurements. Lower exposure doesn't mean safe.</p>
+        </section>
+
+        {/* ---------- cities ---------- */}
+        <section id="cities" aria-labelledby="cities-h" className="lp-wrap lp-sec" style={{ display: 'flex', flexDirection: 'column', gap: 'clamp(40px,5vw,64px)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: twoCols, gap: 'clamp(24px,4vw,64px)', alignItems: 'end' }}>
+            <h2 id="cities-h" className="lp-h2">Four cities. Four kinds of air.</h2>
+            <p className="lp-lede" style={{ maxWidth: 540 }}>The same physics under different winds, coastlines and seasons. Sora's model is trained on three of them and checked on the fourth, a city it has never seen.</p>
+          </div>
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0, borderTop: '1px solid var(--border-default)' }}>
+            {CITIES.map((x) => (
+              <li key={x.key} className="lp-city" style={{ gridTemplateColumns: stack ? '48px minmax(0,1fr)' : '72px minmax(0,0.8fr) minmax(0,1.5fr) 9.5rem' }}>
+                <code style={{ ...MONO, fontSize: 'var(--fs-small)', color: 'var(--text-tertiary)', paddingTop: 10 }}>{CODE[x.key]}</code>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
+                  <h3 style={{ margin: 0, fontSize: 'clamp(24px,2.4vw,32px)', fontWeight: 400, letterSpacing: '-.025em' }}>{x.name}</h3>
+                  <span className={'lp-status' + (x.built ? ' live' : '')}><span className="dot" />{x.status}</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, gridColumn: stack ? '2' : undefined, paddingTop: stack ? 0 : 6 }}>
+                  <p style={{ margin: 0, fontSize: 'var(--fs-h4)', textWrap: 'pretty' }}>{x.note}</p>
+                  <p style={{ margin: 0, fontSize: 'var(--fs-ui)', color: 'var(--text-tertiary)', textWrap: 'pretty' }}>{TRAITS[x.key]}</p>
+                </div>
+                <a href={`${APP_URL}#city=${x.key}`} style={{ gridColumn: stack ? '2' : undefined, justifySelf: stack ? 'start' : 'end', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 'var(--fs-body)', fontWeight: 500, minHeight: 44, whiteSpace: 'nowrap' }}>
+                  {x.built ? 'Open in Sora' : 'See status'}<Icon name="arrow-up-right" size={15} />
+                </a>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        {/* ---------- privacy ---------- */}
+        <section id="privacy" aria-labelledby="privacy-h" className="lp-wrap lp-sec" style={{ display: 'flex', flexDirection: 'column', gap: 'clamp(40px,5vw,64px)' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxWidth: 760 }}>
+            <h2 id="privacy-h" className="lp-h2">Your day stays on your phone.</h2>
+            <p className="lp-lede">To estimate what you breathe, Sora has to know where you go. So it keeps that on your device and sends a server only what a forecast needs.</p>
+          </div>
+          <div style={{ border: '1px solid var(--border-default)', borderRadius: 'var(--radius-xl)', overflow: 'hidden', background: 'var(--surface-base)' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: twoCols }}>
+              {([['smartphone', 'Stays on this device', STAYS], ['send', 'Sent to plan a trip', SENT]] as const).map(([icon, title, items], i) => (
+                <div key={title} style={{ padding: 'clamp(20px,3vw,32px)', borderLeft: !stack && i ? '1px solid var(--border-default)' : 0, borderTop: stack && i ? '1px solid var(--border-default)' : 0, display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 'var(--fs-lead)', fontWeight: 500 }}><span style={{ color: i ? 'var(--text-secondary)' : 'var(--brand)', display: 'flex' }}><Icon name={icon} size={18} /></span>{title}</span>
+                  <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                    {items.map((t) => <li key={t} style={{ padding: '12px 0', borderTop: '1px solid var(--border-subtle)', fontSize: 'var(--fs-h4)', color: i ? 'var(--text-secondary)' : 'var(--text-primary)' }}>{t}</li>)}
+                  </ul>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: '12px 32px', flexWrap: 'wrap', padding: '16px clamp(20px,3vw,32px)', borderTop: '1px solid var(--border-default)', fontSize: 'var(--fs-ui)', color: 'var(--text-secondary)' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Icon name="toggle-right" size={16} />Tracking is off until you turn it on. Pause it, or delete your history in one tap.</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Icon name="shield-check" size={16} />Designed to comply with India's DPDP Act, 2023.</span>
+            </div>
+          </div>
         </section>
 
         {/* ---------- FAQ ---------- */}
@@ -463,7 +560,7 @@ export default function Landing() {
                 <h3 style={{ margin: 0 }}>
                   <button onClick={() => setFaq(faq === i ? -1 : i)} aria-expanded={faq === i} aria-controls={'q-' + i}>{q}<span className="pm"><Icon name="plus" size={20} /></span></button>
                 </h3>
-                {faq === i && <p id={'q-' + i} style={{ margin: 0, padding: '0 48px 24px 0', fontSize: 16, color: 'var(--text-secondary)', textWrap: 'pretty' }}>{a}</p>}
+                {faq === i && <p id={'q-' + i} style={{ margin: 0, padding: '0 48px 24px 0', fontSize: 'var(--fs-h4)', color: 'var(--text-secondary)', textWrap: 'pretty' }}>{a}</p>}
               </div>
             ))}
           </div>
@@ -481,13 +578,13 @@ export default function Landing() {
 
       <footer className="lp-wrap lp-foot" style={{ paddingTop: 40, paddingBottom: 48, display: 'flex', flexDirection: 'column', gap: 24 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
-          <a href="#main" className="lp-brand"><span style={{ color: 'var(--brand)', display: 'flex' }}><Icon name="hexmark" size={18} /></span><span className="word" style={{ fontSize: 16 }}>sora</span></a>
-          <span style={{ fontSize: 14, color: 'var(--text-tertiary)' }}>Air, considered as a dose.</span>
-          <nav aria-label="Footer" style={{ marginLeft: 'auto', display: 'flex', gap: 24, flexWrap: 'wrap', fontSize: 14 }}>
-            <a href="#model">The model</a><a href="#operations">How it works</a><a href="/styleguide">Design system</a><a href="https://github.com/ShrijibMaiti/sora">GitHub</a>
+          <a href="#main" className="lp-brand"><span style={{ color: 'var(--brand)', display: 'flex' }}><Icon name="hexmark" size={18} /></span><span className="word" style={{ fontSize: 'var(--fs-h4)' }}>sora</span></a>
+          <span style={{ fontSize: 'var(--fs-ui)', color: 'var(--text-tertiary)' }}>Air, considered as a dose.</span>
+          <nav aria-label="Footer" style={{ marginLeft: 'auto', display: 'flex', gap: 24, flexWrap: 'wrap', fontSize: 'var(--fs-ui)' }}>
+            <a href="#model">The model</a><a href="#operations">How it works</a><a href="#cities">Cities</a><a href="#privacy">Privacy</a><a href="/styleguide">Design system</a><a href="https://github.com/ShrijibMaiti/sora">GitHub</a>
           </nav>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', paddingTop: 20, borderTop: '1px solid var(--border-default)', fontSize: 12, color: 'var(--text-tertiary)' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', paddingTop: 20, borderTop: '1px solid var(--border-default)', fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>
           <span style={{ maxWidth: 760 }}>Data: CPCB · CAMS / Copernicus · ERA5 · © OpenStreetMap contributors. Contains modified Copernicus Atmosphere Monitoring Service information 2026. Estimates, not measurements or medical advice. Lower exposure doesn't mean safe.</span>
           <span>© 2026 Sora</span>
         </div>

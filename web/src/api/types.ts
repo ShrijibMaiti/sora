@@ -36,14 +36,14 @@ export type Place = { label: string; lat: number; lon: number };
 export type DayRequest = {
   city: string; mode: ModeKey; max_extra_min: number;
   stops: {
-    name: string; place: Place; alternatives?: Place[];
+    name: string; place: Place; alternatives?: (Place & { building?: BuildingKey })[];
     arrive_after?: ISO; leave_before?: ISO; duration_min?: number;
     building: BuildingKey; activity?: 'rest' | 'light' | 'moderate' | 'high';
   }[];
 };
 export type Segment = { me: MeKey; start: ISO; end: ISO; dose: number; label?: string };
 export type DayResponse = {
-  stops: { name: string; place: string; icon: string; window: string; duration: string; building: string }[];
+  stops: { name: string; place: string; chosen: string; icon: string; window: string; duration: string; building: string }[];
   original: { segments: Segment[]; total: Band };
   optimized: { segments: Segment[]; total: Band };
   changes: { icon: string; title: string; detail: string; delta_ug: number }[];

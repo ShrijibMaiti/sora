@@ -27,7 +27,7 @@ export function BootOverlay() {
       <svg viewBox="0 0 400 300" aria-hidden="true" style={{ width: 'min(70%,520px)', height: 'auto' }}>
         {SKEL.map((h, i) => <polygon key={i} points={h.pts} fill="var(--hex-empty)" className="pulse" style={{ animationDelay: h.d }} />)}
       </svg>
-      <span style={{ position: 'absolute', bottom: '40%', fontSize: 13, color: 'var(--text-secondary)', display: 'flex', gap: 8, alignItems: 'center' }}>
+      <span style={{ position: 'absolute', bottom: '40%', fontSize: 'var(--fs-small)', color: 'var(--text-secondary)', display: 'flex', gap: 8, alignItems: 'center' }}>
         <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--border-strong)', borderTopColor: 'var(--brand)', animation: 'sora-spin 800ms linear infinite' }} />
         Loading the 72-hour forecast for {cityOf(st.city).name}…
       </span>
@@ -36,26 +36,38 @@ export function BootOverlay() {
 }
 
 export function FullState() {
-  const { st, set, applyDemo } = useSora();
+  const { st, set, applyDemo, notifyWhenLive } = useSora();
   const city = cityOf(st.city);
   const s = st.demo === 'offline' || st.offline
     ? { icon: 'cloud-off', ibg: 'var(--danger-soft)', ifg: 'var(--danger)', title: "Can't reach Sora", body: "We couldn't load the forecast. Rather than show you stale advice, the map is paused. Check your connection — we'll keep retrying.", pLabel: 'Retry now', primary: () => applyDemo('loading'), sLabel: st.demo === 'offline' ? 'Use last forecast (13:00)' : '', secondary: () => applyDemo('degraded'), foot: `Couldn't load /api/field?city=${st.city}` }
     : !city.built
-      ? { icon: 'construction', ibg: 'var(--surface-raised)', ifg: 'var(--text-primary)', title: `${city.name} isn't built yet`, body: `${city.note} The model for ${city.name} is still being validated, so Sora won't give advice here yet.`, pLabel: 'Back to Delhi', primary: () => set({ city: 'delhi', demo: 'none' }), sLabel: "Notify me when it's live", secondary: () => {}, foot: 'Status: Preview · forecasts visible to the research team only' }
+      ? { icon: 'construction', ibg: 'var(--surface-raised)', ifg: 'var(--text-primary)', title: `${city.name} isn't built yet`, body: `${city.note} The model for ${city.name} is still being validated, so Sora won't give advice here yet.`, pLabel: 'Back to Delhi', primary: () => set({ city: 'delhi', demo: 'none' }), sLabel: "Notify me when it's live", secondary: () => { notifyWhenLive(city.key); set({ city: 'delhi', demo: 'none' }); }, foot: 'Status: Preview · forecasts visible to the research team only' }
       : null;
   if (!s) return null;
   return (
     <div className="scrim" style={{ zIndex: 860 }}>
       <div role="alertdialog" aria-label={s.title} className="dialog" style={{ width: 'min(400px,100%)', padding: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
         <span style={{ width: 44, height: 44, borderRadius: 'var(--radius-md)', background: s.ibg, color: s.ifg, display: 'grid', placeItems: 'center' }}><Icon name={s.icon} size={20} /></span>
-        <h2 style={{ margin: 0, fontSize: 20, fontWeight: 500 }}>{s.title}</h2>
-        <p style={{ margin: 0, fontSize: 14, color: 'var(--text-secondary)', textWrap: 'pretty' }}>{s.body}</p>
+        <h2 style={{ margin: 0, fontSize: 'var(--fs-h3)', fontWeight: 500 }}>{s.title}</h2>
+        <p style={{ margin: 0, fontSize: 'var(--fs-ui)', color: 'var(--text-secondary)', textWrap: 'pretty' }}>{s.body}</p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn-primary" style={{ padding: '0 16px', gap: 8 }} onClick={s.primary}>{s.pLabel}</button>
           {s.sLabel && <button className="btn-secondary" onClick={s.secondary}>{s.sLabel}</button>}
         </div>
-        <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{s.foot}</span>
+        <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-tertiary)' }}>{s.foot}</span>
       </div>
+    </div>
+  );
+}
+
+export function Toast() {
+  const { st, set } = useSora();
+  if (!st.toast) return null;
+  return (
+    <div role="status" aria-live="polite" className="toast popover">
+      <span style={{ color: 'var(--success)', display: 'flex' }}><Icon name="check" size={16} /></span>
+      <span style={{ flex: 1 }}>{st.toast}</span>
+      <button className="icon-btn muted" style={{ width: 32, height: 32 }} onClick={() => set({ toast: null })} aria-label="Dismiss"><Icon name="x" size={14} /></button>
     </div>
   );
 }
@@ -80,7 +92,7 @@ export function Onboarding() {
           <svg viewBox="0 0 400 150" aria-hidden="true" style={{ width: '100%', height: '100%' }}>
             {hex.map((h, i) => <polygon key={i} points={h.pts} fill={h.fill} fillOpacity={h.op} />)}
           </svg>
-          <span style={{ position: 'absolute', width: 56, height: 56, borderRadius: 'var(--radius-lg)', background: 'var(--brand)', color: '#fff', display: 'grid', placeItems: 'center', boxShadow: '0 0 0 6px var(--surface-sunken)' }}>
+          <span style={{ position: 'absolute', width: 56, height: 56, borderRadius: 'var(--radius-lg)', background: 'var(--brand)', color: 'var(--text-on-accent)', display: 'grid', placeItems: 'center', boxShadow: '0 0 0 6px var(--surface-sunken)' }}>
             <Icon name={o.icon} size={26} />
           </span>
         </div>
@@ -88,11 +100,11 @@ export function Onboarding() {
           <div style={{ display: 'flex', gap: 6 }} aria-label={`Step ${st.onb + 1} of 3`}>
             {OB.map((_, i) => <span key={i} style={{ height: 4, flex: 1, borderRadius: 2, background: i <= st.onb ? 'var(--brand)' : 'var(--border-strong)' }} />)}
           </div>
-          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 400, letterSpacing: '-.01em' }}>{o.title}</h2>
-          <p style={{ margin: 0, fontSize: 14, color: 'var(--text-secondary)', textWrap: 'pretty' }}>{o.body}</p>
+          <h2 style={{ margin: 0, fontSize: 'var(--fs-h3-lg)', fontWeight: 400, letterSpacing: '-.01em' }}>{o.title}</h2>
+          <p style={{ margin: 0, fontSize: 'var(--fs-ui)', color: 'var(--text-secondary)', textWrap: 'pretty' }}>{o.body}</p>
           {o.isModes && <ModePicker compact />}
           {o.isLoc && (
-            <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13, color: 'var(--text-secondary)' }}>
+            <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8, fontSize: 'var(--fs-small)', color: 'var(--text-secondary)' }}>
               <li style={{ display: 'flex', gap: 8, alignItems: 'center' }}><Icon name="smartphone" size={15} />Your location stays on this device.</li>
               <li style={{ display: 'flex', gap: 8, alignItems: 'center' }}><Icon name="cloud-off" size={15} />No raw GPS history is sent to the cloud.</li>
               <li style={{ display: 'flex', gap: 8, alignItems: 'center' }}><Icon name="toggle-right" size={15} />You can turn it off any time in Preferences.</li>
