@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { UNC } from '../data/sora';
+import { useEffect, useMemo, useRef } from 'react';
+import { UNC, inBbox, type LatLng } from '../data/sora';
 import { cityOf, useSora } from '../state/store';
 import { Icon } from './Icon';
 import { ModePicker } from './panels/TripPanel';
@@ -28,7 +28,7 @@ export function BootOverlay() {
         {SKEL.map((h, i) => <polygon key={i} points={h.pts} fill="var(--hex-empty)" className="pulse" style={{ animationDelay: h.d }} />)}
       </svg>
       <span style={{ position: 'absolute', bottom: '40%', fontSize: 'var(--fs-small)', color: 'var(--text-secondary)', display: 'flex', gap: 8, alignItems: 'center' }}>
-        <span style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid var(--border-strong)', borderTopColor: 'var(--brand)', animation: 'sora-spin 800ms linear infinite' }} />
+        <span className="spin" style={{ color: 'var(--text-secondary)' }} />
         Loading the 72-hour forecast for {cityOf(st.city).name}…
       </span>
     </div>
@@ -39,22 +39,47 @@ export function FullState() {
   const { st, set, applyDemo, notifyWhenLive } = useSora();
   const city = cityOf(st.city);
   const s = st.demo === 'offline' || st.offline
-    ? { icon: 'cloud-off', ibg: 'var(--danger-soft)', ifg: 'var(--danger)', title: "Can't reach Sora", body: "We couldn't load the forecast. Rather than show you stale advice, the map is paused. Check your connection — we'll keep retrying.", pLabel: 'Retry now', primary: () => applyDemo('loading'), sLabel: st.demo === 'offline' ? 'Use last forecast (13:00)' : '', secondary: () => applyDemo('degraded'), foot: `Couldn't load /api/field?city=${st.city}` }
+    ? { icon: 'cloud-off', ibg: 'var(--danger-soft)', ifg: 'var(--danger)', title: "Can't reach Sora", body: "We couldn't load the forecast. Rather than show you stale advice, the map is paused. Check your connection — we'll keep retrying.", pLabel: 'Retry now', primary: () => applyDemo('loading'), sLabel: st.demo === 'offline' ? 'Use last forecast (13:00)' : '', secondary: () => applyDemo('degraded'), foot: `GET /api/field?city=${st.city} failed` }
     : !city.built
       ? { icon: 'construction', ibg: 'var(--surface-raised)', ifg: 'var(--text-primary)', title: `${city.name} isn't built yet`, body: `${city.note} The model for ${city.name} is still being validated, so Sora won't give advice here yet.`, pLabel: 'Back to Delhi', primary: () => set({ city: 'delhi', demo: 'none' }), sLabel: "Notify me when it's live", secondary: () => { notifyWhenLive(city.key); set({ city: 'delhi', demo: 'none' }); }, foot: 'Status: Preview · forecasts visible to the research team only' }
       : null;
   if (!s) return null;
+  return <BlockingDialog key={s.title} s={s} />;
+}
+
+/** Modal focus: moves focus to `initial` on open, keeps Tab inside the box, and calls onEscape on Esc. */
+function useModalFocus(onEscape?: () => void) {
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => { box.current?.querySelector<HTMLElement>('[data-autofocus],button')?.focus(); }, []);
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Escape' && onEscape) { e.stopPropagation(); onEscape(); return; }
+    if (e.key !== 'Tab' || !box.current) return;
+    const f = [...box.current.querySelectorAll<HTMLElement>('button:not([disabled]),summary,select,input')], first = f[0], last = f[f.length - 1];
+    if (!f.includes(document.activeElement as HTMLElement)) { e.preventDefault(); first.focus(); }
+    else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  };
+  return { box, onKeyDown };
+}
+
+/** Above rail (1200) and panel (900); focus moves in on open and Tab stays inside. */
+function BlockingDialog({ s }: { s: { icon: string; ibg: string; ifg: string; title: string; body: string; pLabel: string; primary: () => void; sLabel: string; secondary: () => void; foot: string } }) {
+  const { box, onKeyDown: trap } = useModalFocus();
   return (
-    <div className="scrim" style={{ zIndex: 860 }}>
-      <div role="alertdialog" aria-label={s.title} className="dialog" style={{ width: 'min(400px,100%)', padding: 24, display: 'flex', flexDirection: 'column', gap: 14 }}>
+    <div className="scrim" style={{ zIndex: 1250, position: 'fixed' }}>
+      <div ref={box} role="alertdialog" aria-modal="true" aria-labelledby="fs-title" aria-describedby="fs-body" className="dialog" onKeyDown={trap}
+        style={{ width: 'min(420px,100%)', padding: 'var(--space-6)', display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
         <span style={{ width: 44, height: 44, borderRadius: 'var(--radius-md)', background: s.ibg, color: s.ifg, display: 'grid', placeItems: 'center' }}><Icon name={s.icon} size={20} /></span>
-        <h2 style={{ margin: 0, fontSize: 'var(--fs-h3)', fontWeight: 500 }}>{s.title}</h2>
-        <p style={{ margin: 0, fontSize: 'var(--fs-ui)', color: 'var(--text-secondary)', textWrap: 'pretty' }}>{s.body}</p>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <h2 id="fs-title" style={{ margin: 0, fontSize: 'var(--fs-h3)', fontWeight: 500 }}>{s.title}</h2>
+        <p id="fs-body" style={{ margin: 0, fontSize: 'var(--fs-ui)', color: 'var(--text-secondary)', textWrap: 'pretty' }}>{s.body}</p>
+        <div style={{ display: 'flex', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
           <button className="btn-primary" style={{ padding: '0 16px', gap: 8 }} onClick={s.primary}>{s.pLabel}</button>
           {s.sLabel && <button className="btn-secondary" onClick={s.secondary}>{s.sLabel}</button>}
         </div>
-        <span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-tertiary)' }}>{s.foot}</span>
+        <details style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-tertiary)' }}>
+          <summary style={{ cursor: 'pointer', minHeight: 24 }}>Details</summary>
+          <span className="mono">{s.foot}</span>
+        </details>
       </div>
     </div>
   );
@@ -79,20 +104,38 @@ const OB = [
 ];
 
 export function Onboarding() {
-  const { st, set, finishOnboarding } = useSora();
+  const { st } = useSora();
+  return st.onb < 0 ? null : <OnboardingDialog />;
+}
+
+function OnboardingDialog() {
+  const { st, set, setTrip, notify, finishOnboarding } = useSora();
+  const { box, onKeyDown } = useModalFocus(finishOnboarding);
   const hex = useMemo(() => svgHex(400, 150, 13, (x, y) => ({
     fill: UNC[Math.min(7, Math.max(0, Math.round(((Math.sin(x / 40) + Math.cos(y / 30) + 2) / 4) * 7)))], op: 0.35 + 0.4 * Math.abs(Math.sin(x * y)),
   })), []);
-  if (st.onb < 0) return null;
   const o = OB[st.onb];
+  /* location stays on the device: it only becomes the trip's start point, and only inside the covered area */
+  const allowLocation = () => {
+    finishOnboarding();
+    if (!('geolocation' in navigator)) { notify("This browser can't share location. Set your start in Plan a trip."); return; }
+    navigator.geolocation.getCurrentPosition((pos) => {
+      const ll: LatLng = [pos.coords.latitude, pos.coords.longitude], c = cityOf(st.city);
+      if (c.built && inBbox(ll[0], ll[1], c.bbox)) {
+        set((s) => ({ custom: { ...s.custom, here: ll } }));
+        setTrip({ origin: 'custom_here' }, true);
+        notify('Trips now start from your location.');
+      } else notify(`You're outside ${c.name}'s covered area, so trips keep their current start.`);
+    }, () => notify('Location was not shared. You can set your start in Plan a trip.'), { timeout: 10000 });
+  };
   return (
     <div className="scrim" style={{ position: 'fixed', zIndex: 2000 }}>
-      <div role="dialog" aria-modal="true" aria-label="Welcome to Sora" className="dialog" style={{ width: 'min(460px,100%)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div ref={box} onKeyDown={onKeyDown} role="dialog" aria-modal="true" aria-label="Welcome to Sora" className="dialog" style={{ width: 'min(460px,100%)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ height: 150, background: 'var(--surface-sunken)', borderBottom: '1px solid var(--border-default)', display: 'grid', placeItems: 'center', overflow: 'hidden', position: 'relative' }}>
           <svg viewBox="0 0 400 150" aria-hidden="true" style={{ width: '100%', height: '100%' }}>
             {hex.map((h, i) => <polygon key={i} points={h.pts} fill={h.fill} fillOpacity={h.op} />)}
           </svg>
-          <span style={{ position: 'absolute', width: 56, height: 56, borderRadius: 'var(--radius-lg)', background: 'var(--brand)', color: 'var(--text-on-accent)', display: 'grid', placeItems: 'center', boxShadow: '0 0 0 6px var(--surface-sunken)' }}>
+          <span style={{ position: 'absolute', width: 56, height: 56, borderRadius: 'var(--radius-lg)', background: 'var(--brand)', color: 'var(--text-on-accent)', display: 'grid', placeItems: 'center' }}>
             <Icon name={o.icon} size={26} />
           </span>
         </div>
@@ -107,12 +150,12 @@ export function Onboarding() {
             <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8, fontSize: 'var(--fs-small)', color: 'var(--text-secondary)' }}>
               <li style={{ display: 'flex', gap: 8, alignItems: 'center' }}><Icon name="smartphone" size={15} />Your location stays on this device.</li>
               <li style={{ display: 'flex', gap: 8, alignItems: 'center' }}><Icon name="cloud-off" size={15} />No raw GPS history is sent to the cloud.</li>
-              <li style={{ display: 'flex', gap: 8, alignItems: 'center' }}><Icon name="toggle-right" size={15} />You can turn it off any time in Preferences.</li>
+              <li style={{ display: 'flex', gap: 8, alignItems: 'center' }}><Icon name="toggle-right" size={15} />Only used as your start point; change it any time in Plan a trip.</li>
             </ul>
           )}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', paddingTop: 4 }}>
             <button className="btn-text" onClick={() => (st.onb === 0 || st.onb === 2 ? finishOnboarding() : set({ onb: st.onb - 1 }))}>{st.onb === 0 ? 'Skip' : st.onb === 2 ? 'Not now' : 'Back'}</button>
-            <button className="btn-primary" style={{ padding: '0 18px' }} onClick={() => (st.onb === 2 ? finishOnboarding() : set({ onb: st.onb + 1 }))}>{st.onb === 2 ? 'Allow location' : 'Continue'}</button>
+            <button className="btn-primary" data-autofocus style={{ padding: '0 18px' }} onClick={() => (st.onb === 2 ? allowLocation() : set({ onb: st.onb + 1 }))}>{st.onb === 2 ? 'Allow location' : 'Continue'}</button>
           </div>
         </div>
       </div>

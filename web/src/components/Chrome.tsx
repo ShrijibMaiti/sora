@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { BUILDINGS, MODES, type BuildingKey, type ModeKey } from '../data/sora';
 import { useSora, type Demo, type Tab } from '../state/store';
 import type { Layout } from '../lib/layout';
@@ -25,7 +26,7 @@ function NavTabs({ L, short }: { L: Layout; short: boolean }) {
   return (
     <>
       {TABS.map((t) => (
-        <button key={t.k} role="tab" className="nav-tab" aria-selected={st.tab === t.k} aria-label={t.label} onClick={() => pick(t.k)}>
+        <button key={t.k} className="nav-tab" aria-current={st.tab === t.k ? 'page' : undefined} aria-label={t.label} onClick={() => pick(t.k)}>
           <span className="pill"><Icon name={t.icon} size={18} /></span>
           {!short && <span className="lbl">{t.short}</span>}
         </button>
@@ -42,14 +43,14 @@ export function Rail({ L }: { L: Layout }) {
   return (
     <nav aria-label="Main" className="rail noscroll">
       <a href="/" className="rail-home" aria-label="Sora home">
-        <span style={{ color: 'var(--brand)', display: 'flex' }}><Icon name="hexmark" size={22} /></span>
+        <span style={{ color: 'var(--brand-text)', display: 'flex' }}><Icon name="hexmark" size={22} /></span>
         <span className="word">sora</span>
       </a>
       <button className="icon-btn" style={{ marginBottom: 12 }} onClick={() => set((s) => ({ panelOpen: !s.panelOpen, tab: s.tab === 'ins' ? 'live' : s.tab }))}
         aria-label={toggleLabel} aria-expanded={panelOpen} title={toggleLabel}>
         <Icon name="menu" size={20} />
       </button>
-      <div role="tablist" aria-orientation="vertical" aria-label="Sections" style={{ display: 'flex', flexDirection: 'column', gap: L.railGap }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: L.railGap }}>
         <NavTabs L={L} short={L.shortRail} />
       </div>
       <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
@@ -61,7 +62,7 @@ export function Rail({ L }: { L: Layout }) {
 }
 
 export function TabBar({ L }: { L: Layout }) {
-  return <nav role="tablist" aria-label="Sections" className="tabbar"><NavTabs L={L} short={false} /></nav>;
+  return <nav aria-label="Main" className="tabbar"><NavTabs L={L} short={false} /></nav>;
 }
 
 const DEMOS: [Demo, string, string][] = [
@@ -88,6 +89,7 @@ const DEV_TOOLS = import.meta.env.DEV || new URLSearchParams(location.search).ha
 
 export function ProfileMenu({ L }: { L: Layout }) {
   const { st, set, applyDemo, toggleTheme, clearHistory } = useSora();
+  const [confirmDelete, setConfirmDelete] = useState(false);
   if (!st.menuOpen) return null;
   const themeLabel = st.theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
   return (
@@ -112,7 +114,11 @@ export function ProfileMenu({ L }: { L: Layout }) {
       <div className="menu-sec tight">
         <button className="menu-item" onClick={toggleTheme}><Icon name={st.theme === 'dark' ? 'sun' : 'moon'} size={15} />{themeLabel}</button>
         <button className="menu-item" onClick={() => set({ onb: 0, menuOpen: false })}><Icon name="rotate-ccw" size={15} />Replay onboarding</button>
-        <button className="menu-item" onClick={clearHistory}><Icon name="trash-2" size={15} />Delete history on this device</button>
+        <button className="menu-item" aria-live="polite" style={confirmDelete ? { color: 'var(--danger)' } : undefined}
+          onClick={() => { if (confirmDelete) { clearHistory(); setConfirmDelete(false); } else setConfirmDelete(true); }}
+          onBlur={() => setConfirmDelete(false)}>
+          <Icon name="trash-2" size={15} />{confirmDelete ? 'Tap again to delete reminders and notices' : 'Delete history on this device'}
+        </button>
       </div>
       {DEV_TOOLS && (
         <div className="menu-sec tight">

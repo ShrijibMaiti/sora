@@ -25,38 +25,47 @@ export function LivePanel() {
   const m = F.meta, degraded = st.demo === 'degraded', ratio = m.n_reporting / Math.max(1, m.n_stations);
   const health: [string, string, string][] = [
     ['Stations', degraded ? `0 of ${m.n_stations} reporting` : `${m.n_reporting} of ${m.n_stations} reporting`, degraded || ratio < 0.5 ? 'var(--danger)' : ratio < 0.9 ? 'var(--warning)' : 'var(--success)'],
-    ['Background forecast', m.background, 'var(--success)'],
+    ['Regional forecast', m.background, 'var(--success)'],
     ['Last analysis', istHHMM(m.analysis_time) + ' IST', 'var(--success)'],
     ['Data status', m.degradation, degraded ? 'var(--warning)' : 'var(--success)'],
   ];
 
+  const cityName = cityOf(st.city).name, ca = AQI[cat(cur.median, F.pollutant)];
+  const nextEvent = st.events[0];
+
   return (
     <div className="stack g32">
-      <PanelHeader eyebrow={`01 · Live map · ${tl.day} · ${tl.time} IST`} title="The city's air, hour by hour.">
-        <p className="lede">Expected to peak around {fieldTime(F, peakT).time} in the next 24 hours.</p>
-      </PanelHeader>
-      <SubTabs items={[['overview', 'Overview'], ['poll', 'Pollutants'], ['events', 'Events'], ['data', 'Data']]} value={sub} onPick={(k) => set((s) => ({ sub: { ...s.sub, live: k } }))} />
+      {/* answer-first: what the air is, at the hour on the time bar */}
+      <PanelHeader title={<><span className="sw" style={{ width: 14, height: 14, borderRadius: 3, background: ca.color, display: 'inline-block', marginRight: 12, verticalAlign: '0.1em' }} />{cityName}: {ca.name.toLowerCase()} air</>}
+        sub={<><span className="tnum">{now.val} {P.unit}</span> <span className="mono" style={{ color: 'var(--text-tertiary)' }}>({now.lo}–{now.hi})</span> city-average {P.label}, {tl.day.toLowerCase() === 'today' ? '' : tl.day + ' '}{tl.time} IST. Peaks around {fieldTime(F, peakT).time} in the next 24 hours.</>} />
+      <SubTabs label="Live map details" items={[['overview', 'Overview'], ['poll', 'Pollutants'], ['events', 'Events'], ['data', 'Data']]} value={sub} onPick={(k) => set((s) => ({ sub: { ...s.sub, live: k } }))} />
 
       {sub === 'overview' && (
         <>
-          <section aria-label="City average" className="sec">
-            <span className="eyebrow">City average · {P.label}</span>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-              <span className="big-num">{now.val}</span>
-              <span style={{ fontSize: 'var(--fs-body)', color: 'var(--text-secondary)' }}>{P.unit}</span>
-              <span className="mono" style={{ fontSize: 'var(--fs-small)', color: 'var(--text-tertiary)' }}>({now.lo}–{now.hi})</span>
-            </div>
-            <figure style={{ margin: '8px 0 0', position: 'relative' }}
+          <section aria-label="Next 72 hours" className="sec">
+            <span className="eyebrow">Next 72 hours · median and 90% range</span>
+            <figure style={{ margin: 0, position: 'relative' }}
               aria-label={`City average ${P.label} over 72 hours, peaking each evening between 19:00 and 22:00. At ${tl.short}: ${now.val} ${P.unit}, range ${now.lo}–${now.hi}.`}>
-              <svg viewBox="0 0 360 120" preserveAspectRatio="none" aria-hidden="true" style={{ width: '100%', height: 140, display: 'block' }}>
-                <path d={band(360, 120)} fill="var(--brand-soft)" />
-                <path d={path(360, 120, (s) => s.median)} fill="none" stroke="var(--brand)" strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
-                <rect x={((st.t / N) * 360 - 4).toFixed(1)} y={(120 - (cur.median / mx) * 120).toFixed(1)} width={8} height={((cur.median / mx) * 120).toFixed(1)} fill="var(--brand)" opacity={0.22} />
+              <svg viewBox="0 0 360 120" preserveAspectRatio="none" aria-hidden="true" style={{ width: '100%', height: 120, display: 'block' }}>
+                <path d={band(360, 120)} fill="var(--surface-active)" />
+                <path d={path(360, 120, (s) => s.median)} fill="none" stroke="var(--text-primary)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
+                <rect x={((st.t / N) * 360 - 0.5).toFixed(1)} y={0} width={1} height={120} fill="var(--text-tertiary)" />
               </svg>
               <span style={{ position: 'absolute', left: ((st.t / N) * 100).toFixed(2) + '%', top: ((1 - cur.median / mx) * 100).toFixed(2) + '%', width: 10, height: 10, borderRadius: '50%', background: 'var(--bg-canvas)', border: '2px solid var(--text-primary)', transform: 'translate(-50%,-50%)' }} />
             </figure>
             <div className="mono" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--fs-micro)', color: 'var(--text-tertiary)' }}>{dayTicks(F).map((d) => <span key={d}>{d}</span>)}</div>
           </section>
+          {nextEvent && (
+            <button className="row-btn ruled" onClick={() => set((s) => ({ sub: { ...s.sub, live: 'events' } }))}
+              style={{ display: 'grid', gridTemplateColumns: '20px minmax(0,1fr) auto', gap: 14, alignItems: 'start', padding: 'var(--space-6) 0 0', color: 'var(--text-primary)' }}>
+              <span style={{ color: SEV[nextEvent.severity], display: 'flex', paddingTop: 2 }}><Icon name={ICON[nextEvent.kind] || 'info'} size={16} /></span>
+              <span className="stack g6">
+                <span style={{ fontSize: 'var(--fs-ui)' }}>{nextEvent.title}</span>
+                <span className="mono" style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>{eventWhen(nextEvent.start, nextEvent.end, F.times[0])} · {Math.round(nextEvent.probability * 100)}% likely</span>
+              </span>
+              <span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{st.events.length > 1 ? `All ${st.events.length} events` : 'Details'}</span>
+            </button>
+          )}
           <SelectedPoint />
         </>
       )}
@@ -102,7 +111,7 @@ export function LivePanel() {
 
       {sub === 'data' && (
         <section aria-label="Data health" className="sec">
-          <span className="eyebrow">Data</span>
+          <span className="eyebrow">Where this forecast comes from</span>
           <dl className="dl" style={{ gap: '14px 24px' }}>
             {health.map(([l, v, dot]) => (
               <div key={l} style={{ display: 'contents' }}>

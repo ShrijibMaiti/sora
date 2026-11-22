@@ -3,7 +3,7 @@ html.route-landing{scroll-behavior:smooth;scroll-padding-top:72px}
 @media (prefers-reduced-motion:reduce){html.route-landing{scroll-behavior:auto}}
 html.route-landing body{font-size:var(--fs-h4);line-height:1.55}
 html.route-landing :focus-visible{outline-offset:3px}
-.lp a{color:var(--brand);text-decoration:none}
+.lp a{color:var(--brand-text);text-decoration:none}
 .lp a:hover{color:var(--brand-hover);text-decoration:none}
 .lp-skip{position:absolute;left:-9999px;top:8px;z-index:100;padding:8px 12px;background:var(--brand);color:var(--text-on-accent) !important;border-radius:var(--radius-md)}
 .lp-skip:focus{left:8px}
@@ -41,10 +41,10 @@ html.route-landing :focus-visible{outline-offset:3px}
 .lp-op{flex:none;display:flex;align-items:baseline;gap:10px;height:56px;padding:0;border:0;background:transparent;font-size:clamp(20px,2.2vw,28px);letter-spacing:-.02em;color:var(--text-tertiary);box-shadow:inset 0 -2px 0 transparent}
 .lp-op .n{font-family:var(--font-mono);font-size:var(--fs-label);color:var(--text-tertiary)}
 .lp-op[aria-selected="true"]{color:var(--text-primary);box-shadow:inset 0 -2px 0 var(--brand)}
-.lp-op[aria-selected="true"] .n{color:var(--brand)}
+
 
 .lp-faq button{width:100%;display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:64px;padding:16px 0;border:0;background:transparent;font-size:var(--fs-lede);font-weight:500;text-align:left;letter-spacing:-.01em}
-.lp-faq button:hover{color:var(--brand)}
+.lp-faq button:hover{color:var(--brand-text)}
 .lp-faq .pm{display:flex;flex:none;color:var(--text-tertiary);transition:transform var(--dur-base) var(--ease-standard)}
 .lp-faq button[aria-expanded="true"] .pm{transform:rotate(45deg)}
 .lp-city{display:grid;gap:10px 24px;align-items:start;padding:28px 0;border-bottom:1px solid var(--border-default)}

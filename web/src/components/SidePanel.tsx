@@ -44,7 +44,7 @@ export function SidePanel({ L }: { L: Layout }) {
           <span />
         </button>
       )}
-      <div className="panel-scroll noscroll" style={{ padding: L.panelPad }}>
+      <div className="panel-scroll" style={{ padding: L.panelPad }}>
         {st.booting ? (
           <div aria-busy="true" aria-label="Loading forecast" className="stack g12">
             <span className="pulse" style={{ height: 20, width: '45%', borderRadius: 4, background: 'var(--surface-overlay)' }} />

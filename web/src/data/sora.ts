@@ -304,14 +304,36 @@ export const ROUTE: Record<RouteId, { token: string; dash: string; w: number }> 
   B: { token: '--route-b', dash: '', w: 5 },
   C: { token: '--route-c', dash: '1 7', w: 4 },
 };
-export const routeColor = (id: RouteId) => `var(${ROUTE[id].token})`;
+/** Blue (--route-b) marks the recommended option; the others take teal/purple in order. Your plan stays neutral.
+ *  rec = null (nothing reliably better) → every option is the same neutral grey, told apart by dash only. */
+export function routeToken(id: RouteId, rec: RouteId | null = 'B') {
+  if (id === 'plan') return '--route-plan';
+  if (rec == null) return '--route-neutral';
+  if (id === rec) return '--route-b';
+  const others = (['A', 'B', 'C'] as RouteId[]).filter((x) => x !== rec);
+  return others.indexOf(id) === 0 ? '--route-a' : '--route-c';
+}
+export const routeColor = (id: RouteId, rec: RouteId | null = 'B') => `var(${routeToken(id, rec)})`;
+
+/** A departure that has already left (1 min grace). Options without an absolute time are never "passed". */
+export const departed = (o: TripOption, now = Date.now()) => !!o.departure_iso && Date.parse(o.departure_iso) < now - 60e3;
+
+/** The option Sora can honestly recommend right now: none when the plan isn't reliable; if the server's pick has
+ *  already left, the best remaining option that still clears 70%; otherwise none. */
+export function recOf(res: PlanOk, now = Date.now()): RouteId | null {
+  if (!res.reliable) return null;
+  const r = res.options.find((o) => o.id === res.recommended);
+  if (r && !departed(r, now)) return r.id;
+  const alt = res.options.filter((o) => !departed(o, now) && (o.p_better ?? 0) >= 0.7).sort((a, b) => b.reduction_pct.median - a.reduction_pct.median)[0];
+  return alt?.id ?? null;
+}
 
 export const pareto = (res: PlanOk, W: number, H: number, pad = 28) => {
   const all = [res.baseline, ...res.options];
   const xs = all.map((o) => o.travel_min), ys = all.flatMap((o) => [o.dose.p05, o.dose.p95]);
   const x0 = Math.min(...xs) - 4, x1 = Math.max(...xs) + 4, y0 = 0, y1 = Math.max(...ys) * 1.1;
   const X = (v: number) => pad + ((v - x0) / (x1 - x0)) * (W - pad - 10), Y = (v: number) => H - pad - ((v - y0) / (y1 - y0)) * (H - pad - 10);
-  const pts = all.map((o) => ({ id: o.id, letter: o.id === 'plan' ? 'You' : o.id, x: X(o.travel_min), y: Y(o.dose.median), y05: Y(o.dose.p05), y95: Y(o.dose.p95), c: routeColor(o.id), hollow: o.id === 'plan' }));
+  const pts = all.map((o) => ({ id: o.id, letter: o.id === 'plan' ? 'You' : o.id, x: X(o.travel_min), y: Y(o.dose.median), y05: Y(o.dose.p05), y95: Y(o.dose.p95), c: routeColor(o.id, recOf(res)), hollow: o.id === 'plan' }));
   const frontier = res.options.slice().sort((a, b) => a.travel_min - b.travel_min).map((o) => X(o.travel_min).toFixed(1) + ',' + Y(o.dose.median).toFixed(1)).join(' ');
   return { pts, frontier, xLabel: 'Travel time (min)' };
 };

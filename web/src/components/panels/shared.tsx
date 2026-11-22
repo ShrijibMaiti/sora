@@ -1,19 +1,21 @@
 import type { ReactNode } from 'react';
 
-export function PanelHeader({ eyebrow, title, children }: { eyebrow: string; title: ReactNode; children?: ReactNode }) {
+/** Answer-first panel header: the heading states the result, `sub` carries its numbers (no kicker labels). */
+export function PanelHeader({ title, sub, children }: { title: ReactNode; sub?: ReactNode; children?: ReactNode }) {
   return (
     <header className="stack g12">
-      <span className="eyebrow">{eyebrow}</span>
       <h1 className="ph1">{title}</h1>
+      {sub && <p className="ph-sub">{sub}</p>}
       {children}
     </header>
   );
 }
 
-export function SubTabs<K extends string>({ items, value, onPick }: { items: [K, string][]; value: K; onPick: (k: K) => void }) {
+/** View switcher inside a panel: a labelled group of pressed-state buttons. */
+export function SubTabs<K extends string>({ items, value, onPick, label = 'View' }: { items: [K, string][]; value: K; onPick: (k: K) => void; label?: string }) {
   return (
-    <div role="tablist" aria-label="Sections" className="subtabs noscroll">
-      {items.map(([k, l]) => <button key={k} role="tab" className="subtab" aria-selected={value === k} onClick={() => onPick(k)}>{l}</button>)}
+    <div role="group" aria-label={label} className="subtabs noscroll">
+      {items.map(([k, l]) => <button key={k} className="subtab" aria-pressed={value === k} onClick={() => onPick(k)}>{l}</button>)}
     </div>
   );
 }

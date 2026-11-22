@@ -105,8 +105,11 @@ export const placeLL = (st: State, k: string): LatLng | undefined =>
 export function planRequest(st: State, F: Field): PlanRequest | { error: 'missing'; message: string } {
   const o = placeLL(st, st.trip.origin), d = placeLL(st, st.trip.dest), t = st.trip;
   if (!o || !d) return { error: 'missing', message: 'Choose a start and destination.' };
-  const t0 = F.times[0], dep = istTimeOnOrAfter(t.dep, t0), depMs = Date.parse(dep), win = +t.win * 60e3;
-  const earliest = new Date(Math.max(depMs - win, Date.parse(t0))).toISOString();
+  /* plan from now, not from the forecast's first hour: a planned time that has already passed today means tomorrow,
+     and the search window never starts in the past */
+  const t0 = F.times[0], nowIso = new Date(Math.max(Date.now(), Date.parse(t0))).toISOString();
+  const dep = istTimeOnOrAfter(t.dep, nowIso), depMs = Date.parse(dep), win = +t.win * 60e3;
+  const earliest = new Date(Math.max(depMs - win, Date.parse(nowIso))).toISOString();
   let latestArrival = t.latest ? istTimeOnOrAfter(t.latest, earliest) : null;
   if (st.demo === 'nofeasible') latestArrival = new Date(Date.parse(earliest) + 10 * 60e3).toISOString();
   return {

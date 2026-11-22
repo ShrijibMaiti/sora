@@ -11,14 +11,14 @@ export function WhatIfPanel() {
   useEffect(() => { askWhatIf(); }, [t, st.fields.pm25, askWhatIf]); // answers follow the current trip
   return (
     <div className="stack g32">
-      <PanelHeader eyebrow="04 · What if" title="Ask before you change your plan.">
-        <p className="lede">
-          Based on <span style={{ color: 'var(--text-primary)' }}>{placeName(t.origin)} → {placeName(t.dest)} · {modeLabel(t.mode)} · {t.dep}</span>.{' '}
-          <button onClick={() => set({ tab: 'trip' })} style={{ border: 0, background: 'transparent', color: 'var(--brand)', fontSize: 'var(--fs-body)', padding: 0 }}>Edit trip</button>
+      <PanelHeader title={`What if, for ${placeName(t.origin)} → ${placeName(t.dest)}`}>
+        <p className="lede" style={{ fontSize: 'var(--fs-small)' }}>
+          {modeLabel(t.mode)}, leaving {t.dep} IST.{' '}
+          <button onClick={() => set({ tab: 'trip' })} style={{ border: 0, background: 'transparent', color: 'var(--text-primary)', textDecoration: 'underline', textUnderlineOffset: 3, fontSize: 'inherit', padding: 0, minHeight: 24 }}>Change trip</button>
         </p>
       </PanelHeader>
       <section aria-label="Questions" className="sec">
-        <span className="eyebrow">Questions</span>
+        <span className="eyebrow">Pick a question</span>
         <div role="group" aria-label="Questions" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {QUESTIONS.map((w, i) => {
             const on = st.wi.includes(i);

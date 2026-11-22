@@ -64,10 +64,13 @@ export function DayPanel() {
 
   return (
     <div className="stack g32">
-      <PanelHeader eyebrow={`03 · Plan my day · ${F ? istDay(F.times[0]) : ''}`} title={`${COUNT[n - 2] ?? n} stops. One day of air.`}>
-        <p className="lede">Sora looks at the whole day together — when you leave, which gym, how you get to dinner — not one trip at a time.</p>
-      </PanelHeader>
-      <SubTabs items={[['schedule', 'Schedule'], ['result', 'Result'], ['changes', 'Changes'], ['timeline', 'Timeline']]} value={sub} onPick={(k) => set((s) => ({ sub: { ...s.sub, day: k } }))} />
+      {/* answer-first once optimized; while editing, the heading says what the button will do */}
+      {!dirty && st.dayDone
+        ? <PanelHeader title={T.p >= 0.7 ? `Your day: about ${T.red.median}% less exposure` : 'Your day is already close to its best'}
+            sub={<><span className="tnum">{fmt(T.orig.median)} → {fmt(T.opt.median)} µg</span> <span className="mono" style={{ color: 'var(--text-tertiary)' }}>({fmt(T.opt.p05)}–{fmt(T.opt.p95)})</span>, +{T.extra} min travel, {Math.round(T.p * 100)}% likely lower. {DAY.changes.length} change{DAY.changes.length === 1 ? '' : 's'} for {F ? istDay(F.times[0]) : 'today'}.</>} />
+        : <PanelHeader title={`Plan ${COUNT[n - 2] ?? n} stops together`}
+            sub={<>Sora weighs the whole day at once: when you leave, which gym, how you get to dinner.</>} />}
+      <SubTabs label="Day plan" items={st.dayDone ? [['schedule', 'Schedule'], ['result', 'Result'], ['changes', 'Changes'], ['timeline', 'Timeline']] : [['schedule', 'Schedule']]} value={sub} onPick={(k) => set((s) => ({ sub: { ...s.sub, day: k } }))} />
 
       {sub === 'schedule' && (
         <section aria-label="Schedule" className="sec">
@@ -114,7 +117,7 @@ export function DayPanel() {
               <span className="mono" style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>({fmt(T.orig.p05)}–{fmt(T.orig.p95)})</span>
             </div>
             <div className="stack g8" style={{ paddingLeft: 24, borderLeft: '1px solid var(--border-default)' }}>
-              <span style={{ fontSize: 'var(--fs-small)', color: 'var(--brand)' }}>Optimized day</span>
+              <span style={{ fontSize: 'var(--fs-small)', color: 'var(--text-primary)', fontWeight: 500 }}>Optimized day</span>
               <span style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}><span className="tnum" style={{ fontSize: 'var(--fs-num-2xl)', fontWeight: 300, lineHeight: 1, letterSpacing: '-.03em' }}>{fmt(T.opt.median)}</span><span style={{ fontSize: 'var(--fs-small)', color: 'var(--text-secondary)' }}>µg</span></span>
               <span className="mono" style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>({fmt(T.opt.p05)}–{fmt(T.opt.p95)})</span>
             </div>
@@ -133,7 +136,7 @@ export function DayPanel() {
           <ol className="stack" style={{ listStyle: 'none', margin: 0, padding: 0, gap: 28 }}>
             {DAY.changes.map((c) => (
               <li key={c.title} style={{ display: 'grid', gridTemplateColumns: '20px minmax(0,1fr) auto', gap: 14, alignItems: 'start' }}>
-                <span style={{ color: 'var(--brand)', display: 'flex', paddingTop: 3 }}><Icon name={c.icon} size={16} /></span>
+                <span style={{ color: 'var(--text-secondary)', display: 'flex', paddingTop: 3 }}><Icon name={c.icon} size={16} /></span>
                 <span className="stack g6"><span style={{ fontSize: 'var(--fs-lead)', letterSpacing: '-.01em' }}>{c.title}</span><span style={{ fontSize: 'var(--fs-ui)', lineHeight: 1.55, color: 'var(--text-secondary)' }}>{c.detail}</span></span>
                 <span className="mono" style={{ fontSize: 'var(--fs-small)', color: 'var(--success)', paddingTop: 3 }}>{c.delta}</span>
               </li>
@@ -154,22 +157,25 @@ export function DayPanel() {
           </div>
           <div role="img" style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 140, borderBottom: '1px solid var(--border-default)', marginTop: 8 }}
             aria-label={`Hourly dose 07:00–23:00 stacked by microenvironment. Original day ${T.orig.median} µg (${T.orig.p05}–${T.orig.p95}); optimized ${T.opt.median} µg (${T.opt.p05}–${T.opt.p95}).${DAY.changes.length ? ' Main change: ' + DAY.changes[0].title + '.' : ''}`}>
+            {/* bars fill 92% of the chart; the comparison tick (original day) only exists in the optimized view */}
             {cur.map((b, i) => (
               <div key={b.h} style={{ flex: 1, display: 'flex', flexDirection: 'column-reverse', gap: 1, height: '100%', position: 'relative' }}>
-                {b.parts.map((p) => <span key={p.me} style={{ height: ((p.v / mxb) * 106).toFixed(1) + 'px', background: p.c, borderRadius: 1, flex: 'none' }} />)}
-                <span style={{ position: 'absolute', left: 0, right: 0, bottom: (st.dayView === 'opt' ? (bo[i].tot / mxb) * 106 : -10).toFixed(1) + 'px', borderTop: '1px dashed var(--text-tertiary)' }} />
+                {b.parts.map((p) => <span key={p.me} style={{ height: ((p.v / mxb) * 92).toFixed(2) + '%', background: p.c, borderRadius: 1, flex: 'none' }} />)}
+                {st.dayView === 'opt' && bo[i].tot > b.tot && (
+                  <span style={{ position: 'absolute', left: -1, right: -1, bottom: `calc(${((bo[i].tot / mxb) * 92).toFixed(2)}% + ${Math.max(0, bo[i].parts.length - 1)}px)`, borderTop: '1.5px dashed var(--text-secondary)' }} />
+                )}
               </div>
             ))}
           </div>
           <div className="mono" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--fs-micro)', color: 'var(--text-tertiary)' }}><span>07:00</span><span>11:00</span><span>15:00</span><span>19:00</span><span>23:00</span></div>
           <div className="stack" style={{ gap: 10, marginTop: 8 }}>
             <div style={{ display: 'grid', gridTemplateColumns: '80px minmax(0,1fr)', gap: 12, alignItems: 'center' }}><span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>Original</span><Strip segs={DAY.original} /></div>
-            <div style={{ display: 'grid', gridTemplateColumns: '80px minmax(0,1fr)', gap: 12, alignItems: 'center' }}><span style={{ fontSize: 'var(--fs-label)', color: 'var(--brand)' }}>Optimized</span><Strip segs={DAY.optimized} /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: '80px minmax(0,1fr)', gap: 12, alignItems: 'center' }}><span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-primary)', fontWeight: 500 }}>Optimized</span><Strip segs={DAY.optimized} /></div>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: '12px 20px', marginTop: 8 }}>
             {ME.map((m) => <span key={m.k} style={{ display: 'inline-flex', alignItems: 'center', gap: 10, fontSize: 'var(--fs-small)', color: 'var(--text-secondary)' }}><span className="sw" style={{ background: `var(--me-${m.k})` }} />{m.label}</span>)}
           </div>
-          <span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>Dashed line: the original day's hourly dose, for comparison.</span>
+          {st.dayView === 'opt' && <span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>Dashed line: the original day's dose in hours where the plan lowers it.</span>}
         </section>
       )}
       <Disclaimer />

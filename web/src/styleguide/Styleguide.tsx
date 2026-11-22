@@ -131,7 +131,7 @@ export default function Styleguide() {
 
   return (
     <div className="sg" style={s('max-width:1320px;margin:0 auto;padding:24px clamp(16px,3vw,40px) 96px;display:flex;flex-direction:column;gap:40px')}>
-      <style>{`html.route-styleguide body{font-size:15px;line-height:1.5}.sg a{color:var(--brand);text-decoration:none}.sg a:hover{color:var(--brand-hover);text-decoration:underline}
+      <style>{`html.route-styleguide body{font-size:15px;line-height:1.5}.sg a{color:var(--brand-text);text-decoration:none}.sg a:hover{color:var(--brand-text);text-decoration:underline}
 .sg :focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}.sg ::selection{background:var(--brand-soft)}
 @keyframes sora-spin{to{transform:rotate(360deg)}}@keyframes sora-pulse{0%,100%{opacity:.55}50%{opacity:1}}`}</style>
 
@@ -159,14 +159,12 @@ export default function Styleguide() {
 
       <section id="principles" style={s('display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:24px;align-items:start')}>
         <div style={s('display:flex;flex-direction:column;gap:12px')}>
-          <span style={s('font-size:12px;color:var(--text-tertiary)')}>01 · Reading of the reference</span>
           <h1 style={s('margin:0;font-size:var(--fs-h1);font-weight:400;letter-spacing:-.02em;line-height:1.1;text-wrap:balance')}>An instrument, not a poster.</h1>
           <p style={s('margin:0;color:var(--text-secondary);text-wrap:pretty')}>Everything here is taken from the Urban Sound dashboard reference: quiet graphite layers, one electric blue, data binned into hexagons, and precise overlays that read like a measuring tool.</p>
         </div>
         <ol style={s('margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:1px;background:var(--border-default);border:1px solid var(--border-default);border-radius:var(--radius-lg);overflow:hidden')}>
           {PRINCIPLES.map((p) => (
             <li key={p.n} style={s('background:var(--surface-base);padding:16px;display:flex;flex-direction:column;gap:6px')}>
-              <span style={s('font-family:var(--font-mono);font-size:11px;color:var(--brand)')}>{p.n}</span>
               <span style={s('font-size:14px;font-weight:500')}>{p.t}</span>
               <span style={s('font-size:13px;color:var(--text-secondary);text-wrap:pretty')}>{p.d}</span>
             </li>
@@ -436,7 +434,7 @@ export default function Styleguide() {
             <ol aria-label="Onboarding progress" style={s('list-style:none;margin:0;padding:0;display:flex;gap:8px;align-items:center')}>
               <li style={s('display:flex;align-items:center;gap:6px;font-size:12px')}><span style={s('width:20px;height:20px;border-radius:50%;background:var(--brand);color:#fff;display:grid;place-items:center')}><Icon name="check" size={12} /></span>City</li>
               <li style={s('flex:1;height:1px;background:var(--brand-line)')} />
-              <li aria-current="step" style={s('display:flex;align-items:center;gap:6px;font-size:12px')}><span style={s('width:20px;height:20px;border-radius:50%;border:1px solid var(--brand);color:var(--brand);display:grid;place-items:center;font-family:var(--font-mono);font-size:11px')}>2</span>Routine</li>
+              <li aria-current="step" style={s('display:flex;align-items:center;gap:6px;font-size:12px')}><span style={s('width:20px;height:20px;border-radius:50%;border:1px solid var(--brand);color:var(--brand-text);display:grid;place-items:center;font-family:var(--font-mono);font-size:11px')}>2</span>Routine</li>
               <li style={s('flex:1;height:1px;background:var(--border-default)')} />
               <li style={s('display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-tertiary)')}><span style={s('width:20px;height:20px;border-radius:50%;border:1px solid var(--border-strong);display:grid;place-items:center;font-family:var(--font-mono);font-size:11px')}>3</span>Location</li>
             </ol>
@@ -516,7 +514,7 @@ export default function Styleguide() {
                     <svg width="28" height="10" aria-hidden="true"><line x1="2" y1="5" x2="26" y2="5" stroke="var(--route-halo)" strokeWidth={m.sw + 3} strokeLinecap="round" /><line x1="2" y1="5" x2="26" y2="5" stroke={m.color} strokeWidth={m.sw} strokeDasharray={m.dash || undefined} strokeLinecap="round" /></svg>
                     <span style={s('font-family:var(--font-mono);font-size:12px;color:var(--text-tertiary)')}>{m.letter}</span>
                     <span style={s('font-size:13px;font-weight:500')}>{o.label}</span>
-                    {m.recommended && <span style={s('margin-left:auto;height:20px;padding:0 6px;border-radius:var(--radius-xs);background:var(--brand);color:#fff;font-size:10px;font-weight:500;display:inline-flex;align-items:center')}>Recommended</span>}
+                    {m.recommended && <span style={s('margin-left:auto;height:20px;padding:0 6px;border-radius:var(--radius-xs);background:var(--brand);color:var(--text-on-accent);font-size:10px;font-weight:500;display:inline-flex;align-items:center')}>Recommended</span>}
                   </div>
                   <div style={s('display:flex;align-items:baseline;gap:6px')}><span style={s('font-size:30px;font-weight:300;line-height:1;font-variant-numeric:tabular-nums')}>{m.doseTxt}</span><span style={s('font-size:12px;color:var(--text-secondary)')}>µg</span><span style={s('font-family:var(--font-mono);font-size:12px;color:var(--text-tertiary)')}>({m.rangeTxt})</span></div>
                   <div style={s('display:flex;gap:6px;flex-wrap:wrap')}>
@@ -541,7 +539,7 @@ export default function Styleguide() {
               <line x1="28" y1="152" x2="314" y2="152" stroke="var(--border-default)" /><line x1="28" y1="10" x2="28" y2="152" stroke="var(--border-default)" />
               <polyline points={P.frontier} fill="none" stroke="var(--text-tertiary)" strokeDasharray="3 4" />
               {P.pts.map((p) => (
-                <g key={p.id}><line x1={p.x} x2={p.x} y1={p.y05} y2={p.y95} stroke={p.c} strokeWidth={2} opacity={0.5} /><circle cx={p.x} cy={p.y} r={5} fill={p.hollow ? 'var(--surface-base)' : p.c} stroke={p.c} strokeWidth={2} /><text x={p.x + 8} y={p.y - 6} fontSize={11} fill="var(--text-secondary)" fontFamily="Geist Mono">{p.letter}</text></g>
+                <g key={p.id}><line x1={p.x} x2={p.x} y1={p.y05} y2={p.y95} stroke={p.c} strokeWidth={2} opacity={0.5} /><circle cx={p.x} cy={p.y} r={5} fill={p.hollow ? 'var(--surface-base)' : p.c} stroke={p.c} strokeWidth={2} /><text x={p.x + 8} y={p.y - 6} fontSize={11} fill="var(--text-secondary)" style={{ fontFamily: 'var(--font-mono)' }}>{p.letter}</text></g>
               ))}
               <text x="314" y="170" textAnchor="end" fontSize={10} fill="var(--text-tertiary)">Travel time (min) →</text>
               <text x="4" y="10" fontSize={10} fill="var(--text-tertiary)">µg</text>
