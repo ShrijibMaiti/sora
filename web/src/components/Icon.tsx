@@ -5,6 +5,7 @@ import {
   Layers, List, Loader, LocateFixed, Map as MapIcon, MapPin, MapPinOff, Menu, MessageCircleQuestion, Minus, Moon, MousePointerClick,
   Palette, Pause, Play, Plus, RadioTower, RefreshCw, RotateCcw, Route, Satellite, ScanLine, Search, SlidersHorizontal, Smartphone,
   Sparkles, Sun, Sunrise, Timer, ToggleRight, TrainFront, TrendingUp, Utensils, Wind, X, type LucideIcon,
+  AirVent, ArrowDownRight, Bell, Building2, ChevronRight, Download, Gauge, Info, Lightbulb, MoveUpRight, Tornado, TrainTrack, TriangleAlert,
 } from 'lucide-react';
 
 /* Lucide line icons re-stroked to 1.6 (design system §Iconography), plus three custom glyphs. */
@@ -19,6 +20,8 @@ const LUCIDE: Record<string, LucideIcon> = {
   satellite: Satellite, 'scan-line': ScanLine, search: Search, 'sliders-horizontal': SlidersHorizontal, smartphone: Smartphone,
   sparkles: Sparkles, sun: Sun, sunrise: Sunrise, timer: Timer, 'toggle-right': ToggleRight, 'train-front': TrainFront,
   'trending-up': TrendingUp, utensils: Utensils, wind: Wind, x: X,
+  'air-vent': AirVent, 'arrow-down-right': ArrowDownRight, bell: Bell, 'building-2': Building2, 'chevron-right': ChevronRight, download: Download,
+  gauge: Gauge, info: Info, lightbulb: Lightbulb, 'move-up-right': MoveUpRight, tornado: Tornado, 'train-track': TrainTrack, 'triangle-alert': TriangleAlert,
 };
 
 const stroke = { fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round' } as const;

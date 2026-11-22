@@ -153,7 +153,7 @@ export default function Landing() {
             </nav>
           )}
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-            {wide && <span className="lp-nav"><a href="https://github.com" style={{ padding: '8px 10px' }}>GitHub</a></span>}
+            {wide && <span className="lp-nav"><a href="https://github.com/ShrijibMaiti/sora" style={{ padding: '8px 10px' }}>GitHub</a></span>}
             <a href={APP_URL} className="lp-btn-ink">Launch Sora</a>
             {!wide && (
               <button onClick={() => setMenu(!menu)} aria-expanded={menu} aria-label="Menu" style={{ width: 44, height: 44, border: 0, background: 'transparent', display: 'grid', placeItems: 'center' }}>
@@ -167,7 +167,7 @@ export default function Landing() {
             <a href="#model" onClick={() => setMenu(false)}>The model</a>
             <a href="#operations" onClick={() => setMenu(false)}>How it works</a>
             <a href="#questions" onClick={() => setMenu(false)}>Questions</a>
-            <a href="https://github.com" style={{ color: 'var(--text-secondary)', borderBottom: 0 }}>GitHub</a>
+            <a href="https://github.com/ShrijibMaiti/sora" style={{ color: 'var(--text-secondary)', borderBottom: 0 }}>GitHub</a>
           </nav>
         )}
       </header>
@@ -484,7 +484,7 @@ export default function Landing() {
           <a href="#main" className="lp-brand"><span style={{ color: 'var(--brand)', display: 'flex' }}><Icon name="hexmark" size={18} /></span><span className="word" style={{ fontSize: 16 }}>sora</span></a>
           <span style={{ fontSize: 14, color: 'var(--text-tertiary)' }}>Air, considered as a dose.</span>
           <nav aria-label="Footer" style={{ marginLeft: 'auto', display: 'flex', gap: 24, flexWrap: 'wrap', fontSize: 14 }}>
-            <a href="#model">The model</a><a href="#operations">How it works</a><a href="/styleguide">Design system</a><a href="https://github.com">GitHub</a>
+            <a href="#model">The model</a><a href="#operations">How it works</a><a href="/styleguide">Design system</a><a href="https://github.com/ShrijibMaiti/sora">GitHub</a>
           </nav>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', paddingTop: 20, borderTop: '1px solid var(--border-default)', fontSize: 12, color: 'var(--text-tertiary)' }}>

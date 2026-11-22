@@ -1,6 +1,6 @@
 # Sora design system
 
-Source of truth for tokens: `web/src/design/tokens.css`. Live reference: `Sora Design System.dc.html` (/app/styleguide).
+Source of truth for tokens: `web/src/design/tokens.css`. Live reference: `/styleguide` (`src/styleguide/Styleguide.tsx`, ported from `Sora Design System.dc.html`).
 
 ## Reading of the reference (Urban Sound dashboard)
 1. Graphite layers, no shadows — depth = 4 near-black surface steps + 1px hairlines.

@@ -22,4 +22,4 @@ npm run build    # typecheck + production build
 
 App deep links: `/app#tab=trip|day|whatif|insights&city=delhi`. Preview states live in the profile menu.
 
-The app uses path routing, so a static host must serve `index.html` for `/app` (SPA fallback). `npm run dev` and `npm run preview` already do.
+Routes: `/` landing, `/app` app, `/styleguide` design system. `npm run build` copies `index.html` into `dist/app/` and `dist/styleguide/` (`scripts/spa-routes.mjs`), so any static host serves them without SPA-fallback config. Add new routes there and in `src/main.tsx`.
