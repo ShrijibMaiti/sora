@@ -1,0 +1,47 @@
+/* Sora design tokens — derived from the reference image (graphite layers, single electric blue, hex data tiles).
+   Dark is the primary theme; light is derived by inverting the surface ladder and deepening data hues for contrast. */
+:root,[data-theme="dark"]{
+  color-scheme:dark;
+  --bg-canvas:#121316;--surface-base:#1a1b1e;--surface-raised:#212226;--surface-overlay:#2a2b30;--surface-sunken:#161719;
+  --surface-hover:rgba(255,255,255,.045);--surface-active:rgba(255,255,255,.08);
+  --border-subtle:#26282c;--border-default:#2e3035;--border-strong:#3d4047;
+  --text-primary:#eef0f3;--text-secondary:#a9adb6;--text-tertiary:#878b95;--text-disabled:#5d616a;--text-on-accent:#ffffff;
+  --brand:#3b7bff;--brand-hover:#5a90ff;--brand-press:#2c66e6;--brand-soft:rgba(59,123,255,.16);--brand-line:rgba(59,123,255,.5);
+  --focus-ring:#8fb3ff;
+  --info:#6a9bff;--info-soft:rgba(106,155,255,.14);--success:#3ccf7a;--success-soft:rgba(60,207,122,.14);
+  --warning:#f2b347;--warning-soft:rgba(242,179,71,.14);--danger:#ff6b6b;--danger-soft:rgba(255,107,107,.14);
+  --aqi-good:#00B050;--aqi-satisfactory:#92D050;--aqi-moderate:#FFFF00;--aqi-poor:#FF9900;--aqi-very-poor:#FF0000;--aqi-severe:#C00000;
+  --aqi-ink:#0b0c0e;--aqi-ink-severe:#ffffff;
+  --field-opacity:.62;--hex-empty:#2a2c31;
+  --unc-1:#e8f0ff;--unc-2:#c3d7ff;--unc-3:#9abcff;--unc-4:#6e9cff;--unc-5:#4a80f5;--unc-6:#3066e0;--unc-7:#234fbf;--unc-8:#1a3a8f;
+  --route-plan:#eef0f3;--route-a:#2fd3c5;--route-b:#3b7bff;--route-c:#c38bff;--route-halo:#0c0d0f;
+  --me-home:#7d8aa6;--me-road:#ff7aa8;--me-vehicle:#b394ff;--me-metro:#4cc3ff;--me-work:#3b7bff;--me-gym:#2fd3c5;--me-restaurant:#f2c46d;
+  --shadow-overlay:0 16px 40px rgba(0,0,0,.5);--scrim:rgba(8,9,11,.66);
+}
+[data-theme="light"]{
+  color-scheme:light;
+  --bg-canvas:#e8eaee;--surface-base:#f5f6f8;--surface-raised:#ffffff;--surface-overlay:#ffffff;--surface-sunken:#eceef2;
+  --surface-hover:rgba(20,22,26,.045);--surface-active:rgba(20,22,26,.08);
+  --border-subtle:#e6e8ec;--border-default:#dcdfe5;--border-strong:#c3c8d0;
+  --text-primary:#14161a;--text-secondary:#474c55;--text-tertiary:#5f646e;--text-disabled:#9a9fa8;
+  --brand:#2563eb;--brand-hover:#1d55d6;--brand-press:#1a47b5;--brand-soft:rgba(37,99,235,.1);--brand-line:rgba(37,99,235,.45);
+  --focus-ring:#2563eb;
+  --info:#2563eb;--info-soft:rgba(37,99,235,.08);--success:#0f7a43;--success-soft:rgba(15,122,67,.1);
+  --warning:#9a5b00;--warning-soft:rgba(196,120,0,.12);--danger:#c62828;--danger-soft:rgba(198,40,40,.08);
+  --field-opacity:.55;--hex-empty:#dfe2e8;
+  --route-plan:#14161a;--route-a:#0b8f85;--route-b:#2563eb;--route-c:#8b4fd9;--route-halo:#ffffff;
+  --me-home:#5d6b88;--me-road:#d9467e;--me-vehicle:#7c5ce0;--me-metro:#0b8cc9;--me-work:#2563eb;--me-gym:#0b8f85;--me-restaurant:#c48a12;
+  --shadow-overlay:0 12px 32px rgba(20,22,26,.14);--scrim:rgba(20,22,26,.42);
+}
+:root{
+  --font-sans:'Geist',ui-sans-serif,system-ui,sans-serif;--font-mono:'Geist Mono',ui-monospace,monospace;
+  --fs-display:clamp(40px,6vw,76px);--fs-h1:clamp(30px,3.6vw,44px);--fs-h2:clamp(24px,2.6vw,32px);--fs-h3:20px;--fs-h4:16px;
+  --fs-body:15px;--fs-small:13px;--fs-label:12px;--fs-micro:11px;--fs-num-xl:clamp(36px,4vw,48px);
+  --lh-tight:1.05;--lh-heading:1.2;--lh-body:1.55;
+  --space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:24px;--space-8:32px;--space-10:40px;--space-12:48px;--space-16:64px;--space-24:96px;
+  --radius-xs:4px;--radius-sm:6px;--radius-md:8px;--radius-lg:12px;--radius-xl:16px;--radius-pill:999px;
+  --dur-instant:80ms;--dur-fast:140ms;--dur-base:220ms;--dur-slow:360ms;--dur-field:900ms;
+  --ease-standard:cubic-bezier(.2,0,0,1);--ease-enter:cubic-bezier(.05,.7,.1,1);--ease-exit:cubic-bezier(.3,0,.8,.15);
+  --container:1200px;--topbar-h:56px;--statusbar-h:40px;--hit:44px;
+}
+@media (prefers-reduced-motion:reduce){:root{--dur-instant:0ms;--dur-fast:0ms;--dur-base:0ms;--dur-slow:0ms;--dur-field:0ms}}

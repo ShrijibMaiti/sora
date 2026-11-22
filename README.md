@@ -127,28 +127,30 @@ sora/
 │   ├── conftest.py
 │   └── test_{qc,aqi,physics,operator,uncertainty,dose,decision,api}.py
 │
-└── web/                              ── Frontend (Vite + React + TypeScript + Leaflet) ──
-    ├── package.json · tsconfig.json · vite.config.ts · index.html · public/favicon.svg
+└── web/                              ── Frontend (Vite + React 18 + TypeScript + Leaflet) ──
+    ├── package.json · tsconfig.json · vite.config.ts · index.html
+    ├── DESIGN.md                                      design system documentation
+    ├── README.md                                      run/build, deep links
     └── src/
-        ├── main.tsx · App.tsx · styles.css
-        ├── api/client.ts · types.ts                  typed API calls
-        ├── components/
-        │   ├── map/FieldMap.tsx                       animated pollution field          §7.4
-        │   ├── map/RouteLayer.tsx                     options A/B/C + your plan
-        │   ├── map/UncertaintyLayer.tsx · Legend.tsx  NAQI colours, uncertainty toggle
-        │   ├── plan/TripForm.tsx                      single trip + departure window    T0
-        │   ├── plan/ScheduleForm.tsx                  whole-day schedule                T1
-        │   ├── plan/OptionCards.tsx                   Pareto options, confidence        §7.1
-        │   ├── plan/ExplanationPanel.tsx              why · benefit · cost · caveats    §29
-        │   ├── timeline/TimeSlider.tsx                field animation
-        │   ├── timeline/ExposureTimeline.tsx          dose along the day by microenv    §7.4
-        │   ├── assistant/WhatIfPanel.tsx              counterfactual questions          §26  T1
-        │   └── assistant/ProactiveCard.tsx            proactive suggestion              §28  T2
-        ├── hooks/useField.ts · usePlan.ts
-        └── lib/format.ts (IST times) · aqiColors.ts
+        ├── main.tsx · App.tsx                         "/" landing, "/app" application
+        ├── design/tokens.css                          design tokens (source of truth)
+        ├── landing/Landing.tsx · landing.css          landing page + hero
+        ├── styles/app.css                             app styles
+        ├── state/store.tsx                            app state, plan runner, theme, onboarding
+        ├── data/sora.ts                               Delhi mock model + /api/plan stand-in   §7.1
+        ├── lib/layout.ts                              rail / panel / overlay geometry
+        └── components/
+            ├── Chrome.tsx                             top bars / rail                         §7
+            ├── MapView.tsx · MapChrome.tsx            Leaflet field map + map controls        §7.4
+            ├── SidePanel.tsx · Overlays.tsx           slide-over panel, overlays/states
+            ├── Insights.tsx                           exposure history                        §22.6
+            ├── Icon.tsx
+            └── panels/LivePanel.tsx · TripPanel.tsx · DayPanel.tsx · WhatIfPanel.tsx · shared.tsx
 ```
 
 ## Status
 
-Structure only; files are empty placeholders except the first data modules
-(`config.py`, `geo.py`, `data/openmeteo.py`, `data/openaq.py`, `data/qc.py`, `data/osm.py`) and `pyproject.toml`.
+- **Backend/ML:** structure only; files are empty placeholders except the first data modules
+  (`config.py`, `geo.py`, `data/openmeteo.py`, `data/openaq.py`, `data/qc.py`, `data/osm.py`) and `pyproject.toml`.
+- **Frontend (`web/`):** landing page and app UI built, running on mock data with hardcoded values;
+  not yet connected to the backend. `cd web; npm install; npm run dev`.

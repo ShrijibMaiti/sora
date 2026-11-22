@@ -5,3 +5,4 @@ __pycache__/
 *.pt
 web/node_modules/
 web/dist/
+graphify-out/
