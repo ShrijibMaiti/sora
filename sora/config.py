@@ -13,11 +13,12 @@ IST_OFFSET_H = 5.5  # all four cities are on IST
 class City:
     name: str
     bbox: tuple[float, float, float, float]       # south, west, north, east — field grid
-    demo_bbox: tuple[float, float, float, float]  # road network used for routing
+    route_bbox: tuple[float, float, float, float]  # road graph; trips must start and end inside (docs/api_contract.md)
 
 
 CITIES = {
-    "delhi": City("Delhi", (28.40, 76.84, 28.88, 77.35), (28.56, 77.18, 28.64, 77.26)),
+    # Delhi route_bbox covers every demo place: Saket, Connaught Place, Lajpat Nagar, IIT, Hauz Khas, Green Park, Khan Market
+    "delhi": City("Delhi", (28.40, 76.84, 28.88, 77.35), (28.515, 77.18, 28.645, 77.25)),
     "kolkata": City("Kolkata", (22.40, 88.20, 22.75, 88.50), (22.52, 88.32, 22.60, 88.40)),
     "mumbai": City("Mumbai", (18.88, 72.77, 19.30, 73.00), (19.00, 72.81, 19.08, 72.89)),
     "chennai": City("Chennai", (12.85, 80.10, 13.25, 80.33), (13.02, 80.21, 13.10, 80.29)),

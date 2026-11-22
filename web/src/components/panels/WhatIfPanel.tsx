@@ -1,12 +1,14 @@
-import { WHATIF, sgn, segs } from '../../data/sora';
-import { useSora } from '../../state/store';
+import { useEffect } from 'react';
+import { sgn, segs } from '../../data/sora';
+import { QUESTIONS, useSora } from '../../state/store';
 import { Icon } from '../Icon';
 import { Disclaimer, Meter, PanelHeader } from './shared';
 import { modeLabel, placeName } from './TripPanel';
 
 export function WhatIfPanel() {
-  const { st, set } = useSora();
+  const { st, set, askWhatIf } = useSora();
   const t = st.trip;
+  useEffect(() => { askWhatIf(); }, [t, st.fields.pm25, askWhatIf]); // answers follow the current trip
   return (
     <div className="stack g32">
       <PanelHeader eyebrow="04 · What if" title="Ask before you change your plan.">
@@ -18,7 +20,7 @@ export function WhatIfPanel() {
       <section aria-label="Questions" className="sec">
         <span className="eyebrow">Questions</span>
         <div role="group" aria-label="Questions" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          {WHATIF.map((w, i) => {
+          {QUESTIONS.map((w, i) => {
             const on = st.wi.includes(i);
             return (
               <button key={w.q} className="wi-chip" aria-pressed={on} onClick={() => set((s) => ({ wi: on ? s.wi.filter((x) => x !== i) : [i, ...s.wi] }))}>
@@ -29,7 +31,10 @@ export function WhatIfPanel() {
         </div>
       </section>
       {st.wi.map((i) => {
-        const w = WHATIF[i], rel = w.p >= 0.7, worse = w.d.median > 0;
+        const a = st.whatif[i], q = QUESTIONS[i];
+        if (!a || a === 'error')
+          return <p key={i} className="lede ruled" aria-busy={!a}>{q.q}: {a ? "couldn't get an answer — try again later." : 'working it out…'}</p>;
+        const w = { q: q.q, d: a.delta_pct, p: a.p_better, verdict: a.verdict, reason: a.reason }, rel = w.p >= 0.7, worse = w.d.median > 0;
         const pct = Math.round(w.p * 100) + '%';
         return (
           <article key={i} className="sec" aria-label={`${w.q}: ${w.verdict}, dose change ${sgn(w.d.median)}% (${w.d.p05} to ${w.d.p95}), ${pct} chance it helps`}>

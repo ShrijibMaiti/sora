@@ -1,6 +1,7 @@
 # Sora — Urban Personal Exposure Digital Twin
 
 Source of truth: [`docs/sora_master_spec.md`](docs/sora_master_spec.md). Section numbers (§) below refer to it.
+API between `web/` and `sora/api/`: [`docs/api_contract.md`](docs/api_contract.md).
 Tiers: **T0** MVP · **T1** Competition · **T2** Research.
 
 ## File tree
@@ -137,8 +138,10 @@ sora/
         ├── landing/Landing.tsx · landing.css          landing page + hero
         ├── styles/app.css                             app styles
         ├── state/store.tsx                            app state, plan runner, theme, onboarding
-        ├── data/sora.ts                               Delhi mock model + /api/plan stand-in   §7.1
-        ├── lib/layout.ts                              rail / panel / overlay geometry
+        ├── api/types.ts · client.ts · mock.ts         API layer (docs/api_contract.md); mock by default
+        ├── data/sora.ts                               Delhi model behind the mock; landing/styleguide content
+        ├── lib/field.ts · time.ts · layout.ts         field sampling, IST times, rail / panel geometry
+        ├── styleguide/Styleguide.tsx                  /styleguide design system page
         └── components/
             ├── Chrome.tsx                             top bars / rail                         §7
             ├── MapView.tsx · MapChrome.tsx            Leaflet field map + map controls        §7.4

@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
-import { DAY, ME, dayBars, hhmm, type DaySeg } from '../../data/sora';
-import { useSora } from '../../state/store';
+import { ME, dayBars, hhmm, type DaySeg } from '../../data/sora';
+import { activeField, useSora } from '../../state/store';
+import { istDay } from '../../lib/time';
 import { Icon } from '../Icon';
 import { Disclaimer, Dl, PanelHeader, SubTabs } from './shared';
 
@@ -15,20 +16,22 @@ function Strip({ segs }: { segs: DaySeg[] }) {
 }
 
 export function DayPanel() {
-  const { st, set } = useSora();
-  const sub = st.sub.day;
-  const T = DAY.total;
+  const { st, set, loadDay } = useSora();
+  const sub = st.sub.day, DAY = st.day, F = activeField(st);
   const { bo, bn, mxb } = useMemo(() => {
+    if (!DAY) return { bo: [], bn: [], mxb: 1 };
     const bo = dayBars(DAY.original, 7, 23), bn = dayBars(DAY.optimized, 7, 23);
     return { bo, bn, mxb: Math.max(...bo.map((b) => b.tot), ...bn.map((b) => b.tot)) };
-  }, []);
+  }, [DAY]);
+  if (!DAY) return <p className="lede" aria-busy="true">{st.dayBusy ? 'Optimizing your day…' : 'Loading your day…'}</p>;
+  const T = DAY.total;
   const cur = st.dayView === 'opt' ? bn : bo;
-  const optimize = () => { set({ dayBusy: true }); setTimeout(() => set((s) => ({ dayBusy: false, dayDone: true, sub: { ...s.sub, day: 'result' } })), 700); };
+  const optimize = async () => { await loadDay(); set((s) => ({ sub: { ...s.sub, day: 'result' } })); };
   const mono = { fontFamily: 'var(--font-mono)' };
 
   return (
     <div className="stack g32">
-      <PanelHeader eyebrow="03 · Plan my day · Sat 21 Nov" title="Five stops. One day of air.">
+      <PanelHeader eyebrow={`03 · Plan my day · ${F ? istDay(F.times[0]) : ''}`} title="Five stops. One day of air.">
         <p className="lede">Sora looks at the whole day together — when you leave, which gym, how you get to dinner — not one trip at a time.</p>
       </PanelHeader>
       <SubTabs items={[['schedule', 'Schedule'], ['result', 'Result'], ['changes', 'Changes'], ['timeline', 'Timeline']]} value={sub} onPick={(k) => set((s) => ({ sub: { ...s.sub, day: k } }))} />

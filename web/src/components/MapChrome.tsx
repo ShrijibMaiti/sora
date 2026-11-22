@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
-import { AQI, BP, CITIES, DEGRADE, PLACES, POLL, UNC, aqiIndex, cat, cityMean, timeLabel } from '../data/sora';
-import { cityOf, useSora } from '../state/store';
+import { AQI, BP, DEGRADE, PLACES, POLL, UNC, aqiIndex, cat } from '../data/sora';
+import { activeField, cityOf, useSora } from '../state/store';
+import { fieldMean, fieldSeries, fieldTime, lastHour, relDay } from '../lib/field';
+import { istHHMM } from '../lib/time';
 import type { Layout } from '../lib/layout';
 import { Icon } from './Icon';
 
@@ -10,11 +12,15 @@ export function FloatTop({ L }: { L: Layout }) {
   const city = cityOf(st.city);
   const q = st.searchQ.trim().toLowerCase();
   const results = q ? PLACES.filter((p) => (p.name + ' ' + p.sub).toLowerCase().includes(q)) : PLACES.slice(0, 5);
-  const P = POLL.find((p) => p.k === st.poll)!;
-  const degr = st.demo === 'degraded' ? DEGRADE[5] : st.offline ? DEGRADE[7] : DEGRADE[1];
-  const cm = cityMean(st.t, st.poll), ca = AQI[cat(cm.median, st.poll)];
-  const forecast = L.mob ? '14:00 IST' : st.offline ? 'Last forecast 13:00 IST · reconnecting' : 'Forecast updated 14:00 IST · next update 15:00';
+  const F = activeField(st), meta = F?.meta;
+  const P = POLL.find((p) => p.k === (F?.pollutant ?? st.poll))!;
+  const degr = st.demo === 'degraded' ? DEGRADE[5] : st.offline || !meta ? DEGRADE[7] : DEGRADE.find((d) => d.l === meta.degradation) || DEGRADE[7];
+  const cm = F ? fieldMean(F, st.t) : null, ca = cm ? AQI[cat(cm.median, P.k)] : null;
+  const updated = meta ? istHHMM(meta.analysis_time) + ' IST' : '—';
+  const forecast = L.mob ? updated : st.offline ? `Last forecast ${updated} · reconnecting` : meta ? `Forecast updated ${updated} · next update ${istHHMM(meta.next_update)}` : 'Loading forecast…';
   const degraded = st.demo === 'degraded';
+  const sparse = degraded || (meta ? meta.n_reporting / Math.max(1, meta.n_stations) < 0.5 : true);
+  const alertEvent = st.events.find((e) => e.severity === 'warning');
   const banner = degraded
     ? { icon: 'satellite', text: "CAMS only — treat advice as indicative. Ground stations haven't reported since 11:00.", c: 'var(--warning)', action: 'Dismiss' }
     : st.demo === 'offline' ? { icon: 'cloud-off', text: "Can't reach Sora's servers. Retrying every 30 s.", c: 'var(--danger)', action: 'Retry now' } : null;
@@ -53,7 +59,7 @@ export function FloatTop({ L }: { L: Layout }) {
           </button>
           {st.cityOpen && (
             <div role="listbox" aria-label="City" className="popover" style={{ position: 'absolute', top: 52, left: 0, width: 260, borderRadius: 'var(--radius-md)', padding: 4, display: 'flex', flexDirection: 'column', zIndex: 1300 }}>
-              {CITIES.map((c) => (
+              {st.cities.map((c) => (
                 <button key={c.key} role="option" aria-selected={c.key === st.city} className="city-opt"
                   onClick={() => set((s) => ({ city: c.key, cityOpen: false, pt: null, demo: c.built && s.demo === 'notbuilt' ? 'none' : s.demo }))}>
                   <span style={{ flex: 1, fontSize: 13 }}>{c.name}</span>
@@ -67,7 +73,10 @@ export function FloatTop({ L }: { L: Layout }) {
 
       <div className="chip-row noscroll">
         <div role="radiogroup" aria-label="Pollutant" className="poll-group popover noscroll">
-          {POLL.map((p) => <button key={p.k} role="radio" aria-checked={st.poll === p.k} className="poll-btn" onClick={() => set({ poll: p.k })}>{p.label}</button>)}
+          {POLL.map((p) => {
+            const f = st.fields[p.k], na = f === 'unavailable';
+            return <button key={p.k} role="radio" aria-checked={st.poll === p.k} className="poll-btn" disabled={na || !f} title={na ? `${p.label} is not forecast for ${city.name} yet` : undefined} onClick={() => set({ poll: p.k })}>{p.label}</button>;
+          })}
         </div>
         <span className="chip"><Icon name="refresh-cw" size={13} />{forecast}</span>
         <span className="chip" title={`Data status ${degr.l}: ${degr.src}, ${degr.conf} confidence`}>
@@ -75,19 +84,22 @@ export function FloatTop({ L }: { L: Layout }) {
           <span className="mono" style={{ color: 'var(--text-tertiary)' }}>{degr.l}</span>
           <span style={{ color: 'var(--text-primary)' }}>{degr.src + (degr.conf === 'Low' ? ' — low confidence' : '')}</span>
         </span>
-        <span className="chip">
-          <span className="mono" style={{ minWidth: 30, height: 20, padding: '0 6px', borderRadius: 'var(--radius-pill)', background: ca.color, color: ca.ink, fontSize: 11, display: 'grid', placeItems: 'center' }}>{aqiIndex(cityMean(st.t).median)}</span>
-          <span style={{ color: 'var(--text-primary)' }}>{ca.name}</span>
-          <span className="mono">{Math.round(cm.median)} {P.unit}</span>
-        </span>
-        <span className="chip" style={{ color: 'var(--warning)' }}><Icon name="flame" size={13} />Smoke from upwind fires</span>
+        {cm && ca && (
+          <span className="chip">
+            {P.k === 'pm25' && <span className="mono" style={{ minWidth: 30, height: 20, padding: '0 6px', borderRadius: 'var(--radius-pill)', background: ca.color, color: ca.ink, fontSize: 11, display: 'grid', placeItems: 'center' }} title="PM2.5 sub-index (CPCB NAQI)">{aqiIndex(cm.median)}</span>}
+            {P.k !== 'pm25' && <span style={{ width: 8, height: 8, borderRadius: 2, background: ca.color }} />}
+            <span style={{ color: 'var(--text-primary)' }}>{ca.name}</span>
+            <span className="mono">{P.k === 'co' ? cm.median.toFixed(1) : Math.round(cm.median)} {P.unit}</span>
+          </span>
+        )}
+        {alertEvent && <span className="chip" style={{ color: 'var(--warning)' }}><Icon name="flame" size={13} />{alertEvent.title}</span>}
         <span className="chip">
           <span style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 13 }}>
             <span style={{ width: 3, height: 5, borderRadius: 1, background: 'var(--text-primary)' }} />
-            <span style={{ width: 3, height: 9, borderRadius: 1, background: degraded ? 'var(--border-strong)' : 'var(--text-primary)' }} />
+            <span style={{ width: 3, height: 9, borderRadius: 1, background: sparse ? 'var(--border-strong)' : 'var(--text-primary)' }} />
             <span style={{ width: 3, height: 13, borderRadius: 1, background: 'var(--border-strong)' }} />
           </span>
-          {degraded ? 'Sparse monitoring' : 'Moderate monitoring'}
+          {sparse ? 'Sparse monitoring' : 'Moderate monitoring'}
         </span>
       </div>
 
@@ -181,22 +193,35 @@ export function MapControls({ L }: { L: Layout }) {
 }
 
 /* ---------- time scrubber ---------- */
+/** City-average series of the active field, with SVG path builders. Empty until the field loads. */
 export function useSeries() {
   const { st } = useSora();
+  const F = activeField(st);
   return useMemo(() => {
-    const ser = Array.from({ length: 73 }, (_, t) => cityMean(t, st.poll));
-    const mx = Math.max(...ser.map((s) => s.p95)) * 1.05;
-    const path = (W: number, H: number, f: (s: (typeof ser)[number]) => number) => 'M' + ser.map((s, i) => ((i / 72) * W).toFixed(1) + ' ' + (H - (f(s) / mx) * H).toFixed(1)).join(' L');
-    const band = (W: number, H: number) => path(W, H, (s) => s.p95) + ' L' + ser.slice().reverse().map((s, j) => (((72 - j) / 72) * W).toFixed(1) + ' ' + (H - (s.p05 / mx) * H).toFixed(1)).join(' L') + ' Z';
-    return { ser, mx, path, band };
-  }, [st.poll]);
+    const ser = F ? fieldSeries(F) : [{ median: 0, p05: 0, p95: 0 }], N = Math.max(1, ser.length - 1);
+    const mx = Math.max(1e-9, ...ser.map((s) => s.p95)) * 1.05;
+    const path = (W: number, H: number, f: (s: (typeof ser)[number]) => number) => 'M' + ser.map((s, i) => ((i / N) * W).toFixed(1) + ' ' + (H - (f(s) / mx) * H).toFixed(1)).join(' L');
+    const band = (W: number, H: number) => path(W, H, (s) => s.p95) + ' L' + ser.slice().reverse().map((s, j) => (((N - j) / N) * W).toFixed(1) + ' ' + (H - (s.p05 / mx) * H).toFixed(1)).join(' L') + ' Z';
+    return { ser, mx, N, path, band };
+  }, [F]);
+}
+
+/** Day ticks for the 72 h axis: "Sat 14:00 · Sun · Mon · Tue 14:00". */
+export function dayTicks(F: ReturnType<typeof activeField>) {
+  if (!F) return [] as string[];
+  const out = [F.times[0]], first = relDay(F.times[0], F.times[0]);
+  F.times.forEach((t, i) => { if (i && istHHMM(t) < istHHMM(F.times[i - 1])) out.push(t); });
+  return out.map((t, i) => (i === 0 ? first + ' ' + istHHMM(t) : relDay(t, F.times[0])));
 }
 
 export function TimeScrubber({ L }: { L: Layout }) {
   const { st, set } = useSora();
-  const { path, band } = useSeries();
+  const F = activeField(st);
+  const { path, band, N } = useSeries();
   const spark = useMemo(() => ({ line: path(720, 36, (s) => s.median), band: band(720, 36) }), [path, band]);
-  const tl = timeLabel(st.t);
+  const tl = F ? fieldTime(F, st.t) : { day: '', time: '--:--', short: 'Loading…' };
+  const T = F ? lastHour(F) : 72;
+  const midnights = F ? F.times.map((t, i) => (i && istHHMM(t) < istHHMM(F.times[i - 1]) ? i : -1)).filter((i) => i > 0) : [];
   return (
     <div className="scrub popover" style={{ left: L.scrubLeft, right: L.scrubRight, bottom: L.scrubBottom }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -211,14 +236,14 @@ export function TimeScrubber({ L }: { L: Layout }) {
           <svg viewBox="0 0 720 36" preserveAspectRatio="none" aria-hidden="true" style={{ position: 'absolute', left: 8, right: 8, top: 2, width: 'calc(100% - 16px)', height: 30 }}>
             <path d={spark.band} fill="var(--brand-soft)" />
             <path d={spark.line} fill="none" stroke="var(--brand)" strokeWidth={1.4} vectorEffect="non-scaling-stroke" />
-            {[10, 34, 58].map((t) => { const x = ((t / 72) * 720).toFixed(1); return <line key={t} x1={x} x2={x} y1={0} y2={36} stroke="var(--border-strong)" strokeDasharray="2 3" vectorEffect="non-scaling-stroke" />; })}
+            {midnights.map((t) => { const x = ((t / N) * 720).toFixed(1); return <line key={t} x1={x} x2={x} y1={0} y2={36} stroke="var(--border-strong)" strokeDasharray="2 3" vectorEffect="non-scaling-stroke" />; })}
           </svg>
-          <input type="range" min={0} max={72} step={1} value={st.t} onChange={(e) => set({ t: +e.target.value, playing: false })} aria-label="Forecast hour" aria-valuetext={`${tl.day} · ${tl.time} IST`} />
+          <input type="range" min={0} max={T} step={1} value={st.t} disabled={!F} onChange={(e) => set({ t: +e.target.value, playing: false })} aria-label="Forecast hour" aria-valuetext={`${tl.day} · ${tl.time} IST`} />
         </div>
       </div>
-      {L.scrubFoot && (
+      {L.scrubFoot && F && (
         <div style={{ display: 'flex', gap: 8, fontSize: 10, color: 'var(--text-tertiary)', paddingLeft: L.scrubAttrPad, minWidth: 0 }}>
-          <span className="mono" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>{L.mob ? 'Sat · Sun · Mon · Tue' : 'Sat 14:00 · Sun · Mon · Tue 14:00'}</span>
+          <span className="mono" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 }}>{(L.mob ? dayTicks(F).map((d) => d.split(' ')[0]) : dayTicks(F)).join(' · ')}</span>
         </div>
       )}
     </div>

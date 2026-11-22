@@ -38,8 +38,8 @@ export function BootOverlay() {
 export function FullState() {
   const { st, set, applyDemo } = useSora();
   const city = cityOf(st.city);
-  const s = st.demo === 'offline'
-    ? { icon: 'cloud-off', ibg: 'var(--danger-soft)', ifg: 'var(--danger)', title: "Can't reach Sora", body: "We couldn't load the forecast. Rather than show you stale advice, the map is paused. Check your connection — we'll keep retrying.", pLabel: 'Retry now', primary: () => applyDemo('loading'), sLabel: 'Use last forecast (13:00)', secondary: () => applyDemo('degraded'), foot: 'Error: network timeout after 10 s · /api/field?city=delhi' }
+  const s = st.demo === 'offline' || st.offline
+    ? { icon: 'cloud-off', ibg: 'var(--danger-soft)', ifg: 'var(--danger)', title: "Can't reach Sora", body: "We couldn't load the forecast. Rather than show you stale advice, the map is paused. Check your connection — we'll keep retrying.", pLabel: 'Retry now', primary: () => applyDemo('loading'), sLabel: st.demo === 'offline' ? 'Use last forecast (13:00)' : '', secondary: () => applyDemo('degraded'), foot: `Couldn't load /api/field?city=${st.city}` }
     : !city.built
       ? { icon: 'construction', ibg: 'var(--surface-raised)', ifg: 'var(--text-primary)', title: `${city.name} isn't built yet`, body: `${city.note} The model for ${city.name} is still being validated, so Sora won't give advice here yet.`, pLabel: 'Back to Delhi', primary: () => set({ city: 'delhi', demo: 'none' }), sLabel: "Notify me when it's live", secondary: () => {}, foot: 'Status: Preview · forecasts visible to the research team only' }
       : null;
@@ -52,7 +52,7 @@ export function FullState() {
         <p style={{ margin: 0, fontSize: 14, color: 'var(--text-secondary)', textWrap: 'pretty' }}>{s.body}</p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn-primary" style={{ padding: '0 16px', gap: 8 }} onClick={s.primary}>{s.pLabel}</button>
-          <button className="btn-secondary" onClick={s.secondary}>{s.sLabel}</button>
+          {s.sLabel && <button className="btn-secondary" onClick={s.secondary}>{s.sLabel}</button>}
         </div>
         <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{s.foot}</span>
       </div>

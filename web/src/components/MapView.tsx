@@ -1,8 +1,9 @@
 import { useEffect, useReducer, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { AQI, CITIES, FIRES, PLACES, POLL, STATIONS, UNC, ROUTE, coverage, hexGrid, hexPoly, inBbox, sample, type LatLng, type RouteId } from '../data/sora';
-import { cityOf, useSora } from '../state/store';
+import { AQI, PLACES, POLL, UNC, ROUTE, hexGrid, hexPoly, inBbox, type LatLng, type RouteId, type Sample } from '../data/sora';
+import { activeField, cityOf, useSora } from '../state/store';
+import { sampleField } from '../lib/field';
 import type { Layout } from '../lib/layout';
 import { Icon, flameSvg } from './Icon';
 
@@ -12,7 +13,8 @@ type Hex = { la: number; lo: number; cov: number; poly: L.Polygon };
 export function MapView({ L: lay }: { L: Layout }) {
   const { st, set, ref, mapRef, runPlan, selectOpt } = useSora();
   const el = useRef<HTMLDivElement>(null);
-  const g = useRef<{ hexes: Hex[]; stations: L.LayerGroup; fires: L.LayerGroup; wind: L.LayerGroup; routes: L.LayerGroup; stops: L.LayerGroup; tiles?: L.TileLayer; labels?: L.TileLayer; fitKey?: string } | null>(null);
+  const g = useRef<{ hexes: Hex[]; field: L.LayerGroup; renderer: L.Canvas; stations: L.LayerGroup; fires: L.LayerGroup; wind: L.LayerGroup; routes: L.LayerGroup; stops: L.LayerGroup; tiles?: L.TileLayer; labels?: L.TileLayer; fitKey?: string } | null>(null);
+  const F = activeField(st), pm = st.fields.pm25 && st.fields.pm25 !== 'unavailable' ? st.fields.pm25 : null;
   const [, tick] = useReducer((x: number) => x + 1, 0);
   const layRef = useRef(lay);
   layRef.current = lay;
@@ -23,22 +25,10 @@ export function MapView({ L: lay }: { L: Layout }) {
     const map = L.map(el.current, { zoomControl: false, attributionControl: false, preferCanvas: true, minZoom: 9, maxZoom: 15, zoomSnap: 0.5 })
       .setView([28.62, 77.17], window.innerWidth < 768 ? 10 : 11);
     mapRef.current = map;
-    const renderer = L.canvas({ padding: 0.4 });
-    const r = 0.0105;
-    const hexes = hexGrid(CITIES[0].demo_bbox, r).map(([la, lo]) => ({
-      la, lo, cov: coverage(la, lo),
-      poly: L.polygon(hexPoly(la, lo, r, 0.86), { renderer, stroke: false, fillOpacity: 0.5, interactive: false }),
-    }));
-    L.layerGroup(hexes.map((h) => h.poly)).addTo(map);
-    const stations = L.layerGroup(STATIONS.map((s) => L.marker([s[0], s[1]], {
-      keyboard: false,
-      icon: L.divIcon({ className: '', iconSize: [12, 12], html: '<div style="width:10px;height:10px;margin:1px;transform:rotate(45deg);background:var(--surface-raised);border:1.5px solid var(--text-primary)"></div>' }),
-    }).bindTooltip(s[2] + ' · station', { direction: 'top', offset: [0, -6] })));
-    const fires = L.layerGroup(FIRES.map((f) => L.marker(f, {
-      keyboard: false,
-      icon: L.divIcon({ className: '', iconSize: [22, 22], html: '<div style="width:22px;height:22px;border-radius:6px;background:var(--surface-overlay);border:1px solid var(--warning);display:grid;place-items:center;color:var(--warning)">' + flameSvg(13) + '</div>' }),
-    }).bindTooltip('Active fire · satellite', { direction: 'top', offset: [0, -10] })));
-    g.current = { hexes, stations, fires, wind: L.layerGroup(), routes: L.layerGroup().addTo(map), stops: L.layerGroup().addTo(map) };
+    g.current = {
+      hexes: [], field: L.layerGroup().addTo(map), renderer: L.canvas({ padding: 0.4 }), stations: L.layerGroup(), fires: L.layerGroup(), wind: L.layerGroup(),
+      routes: L.layerGroup().addTo(map), stops: L.layerGroup().addTo(map),
+    };
 
     map.on('click', (e: L.LeafletMouseEvent) => {
       const s = ref.current, ll: LatLng = [e.latlng.lat, e.latlng.lng];
@@ -66,22 +56,43 @@ export function MapView({ L: lay }: { L: Layout }) {
     G.labels = L.tileLayer(base + '_Gray_Reference/MapServer/tile/{z}/{y}/{x}', { maxZoom: 16, pane: 'shadowPane', opacity: 0.8 }).addTo(map);
   }, [st.theme, mapRef]);
 
-  /* hex field */
+  /* hexes, stations, fires: rebuilt when a city's PM2.5 field (re)loads */
   useEffect(() => {
     const G = g.current;
     if (!G) return;
+    G.field.clearLayers(); G.stations.clearLayers(); G.fires.clearLayers(); G.hexes = [];
+    if (!pm) return;
+    const r = 0.0105;
+    G.hexes = hexGrid(cityOf(pm.city).bbox, r).map(([la, lo]) => ({
+      la, lo, cov: sampleField(pm, 0, la, lo).coverage,
+      poly: L.polygon(hexPoly(la, lo, r, 0.86), { renderer: G.renderer, stroke: false, fillOpacity: 0, interactive: false }).addTo(G.field),
+    }));
+    pm.stations.forEach((s) => L.marker([s.lat, s.lon], {
+      keyboard: false,
+      icon: L.divIcon({ className: '', iconSize: [12, 12], html: `<div style="width:10px;height:10px;margin:1px;transform:rotate(45deg);background:var(--surface-raised);border:1.5px solid ${s.reporting ? 'var(--text-primary)' : 'var(--text-tertiary)'}"></div>` }),
+    }).bindTooltip(s.name + ' · station' + (s.reporting ? '' : ' · not reporting'), { direction: 'top', offset: [0, -6] }).addTo(G.stations));
+    pm.fires.forEach((f) => L.marker(f, {
+      keyboard: false,
+      icon: L.divIcon({ className: '', iconSize: [22, 22], html: '<div style="width:22px;height:22px;border-radius:6px;background:var(--surface-overlay);border:1px solid var(--warning);display:grid;place-items:center;color:var(--warning)">' + flameSvg(13) + '</div>' }),
+    }).bindTooltip('Active fire · satellite', { direction: 'top', offset: [0, -10] }).addTo(G.fires));
+  }, [pm]);
+
+  /* hex colours */
+  useEffect(() => {
+    const G = g.current;
+    if (!G || !F) return;
     const dark = st.theme !== 'light', empty = dark ? '#2a2c31' : '#d5d9e0', op = dark ? 0.36 : 0.34;
     for (const h of G.hexes) {
       let fill: string, fo: number;
       if (h.cov < 0.05) { fill = empty; fo = 0.8; }
       else {
-        const s = sample(st.t, h.la, h.lo, st.poll);
-        if (st.unc) { const rel = (s.p95 - s.p05) / s.median; fill = UNC[Math.max(0, Math.min(7, Math.round(((rel - 0.2) / 0.55) * 7)))]; fo = 0.72; }
+        const s = sampleField(F, st.t, h.la, h.lo);
+        if (st.unc) { fill = UNC[Math.max(0, Math.min(7, Math.round(((s.spread - 0.2) / 0.55) * 7)))]; fo = 0.72; }
         else { fill = AQI[s.cat].color; fo = op; }
       }
       h.poly.setStyle({ fillColor: fill, fillOpacity: fo });
     }
-  }, [st.t, st.poll, st.unc, st.theme]);
+  }, [F, st.t, st.unc, st.theme]); // runs after the rebuild effect above in the same commit
 
   /* layer toggles */
   useEffect(() => {
@@ -90,20 +101,20 @@ export function MapView({ L: lay }: { L: Layout }) {
     ([['stations', G.stations], ['fires', G.fires], ['wind', G.wind]] as const).forEach(([k, grp]) => (st.lay[k] ? grp.addTo(map) : map.removeLayer(grp)));
   }, [st.lay, mapRef]);
 
-  /* wind arrows */
+  /* wind arrows (city-mean wind from the field response) */
   useEffect(() => {
     const G = g.current;
-    if (!G || !st.lay.wind) return;
+    if (!G || !st.lay.wind || !pm) return;
     G.wind.clearLayers();
-    const h = (14 + st.t) % 24, dir = 128 + 18 * Math.sin(st.t / 6), spd = 1.6 + 1.4 * Math.exp(-Math.pow(((h - 14 + 24) % 24), 2) / 18);
-    const len = Math.round(10 + spd * 5);
-    for (let la = 28.45; la < 28.86; la += 0.07) for (let lo = 76.9; lo < 77.34; lo += 0.08) {
+    const i = Math.max(0, Math.min(pm.wind.dir_deg.length - 1, Math.round(st.t))), dir = pm.wind.dir_deg[i], spd = pm.wind.speed_ms[i];
+    const len = Math.round(10 + spd * 5), [s, w, n, e] = cityOf(pm.city).bbox;
+    for (let la = s + 0.05; la < n; la += 0.07) for (let lo = w + 0.06; lo < e; lo += 0.08) {
       G.wind.addLayer(L.marker([la, lo], {
         interactive: false, keyboard: false,
         icon: L.divIcon({ className: '', iconSize: [30, 30], html: '<div style="width:30px;height:30px;display:grid;place-items:center;transform:rotate(' + dir.toFixed(0) + 'deg);color:var(--text-primary);opacity:.7"><svg width="6" height="' + len + '" viewBox="0 0 6 ' + len + '"><path d="M3 ' + len + 'V2M0.5 5L3 1.5 5.5 5" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round"/></svg></div>' }),
       }));
     }
-  }, [st.t, st.lay.wind]);
+  }, [st.t, st.lay.wind, pm]);
 
   /* routes + stops */
   const res = st.res;
@@ -167,10 +178,11 @@ function PointPopover() {
   if (!st.pt || !map) return null;
   const p = map.latLngToContainerPoint(st.pt), sz = map.getSize();
   if (p.x < 0 || p.y < 0 || p.x > sz.x || p.y > sz.y) return null;
-  const city = cityOf(st.city), inside = city.built && inBbox(st.pt[0], st.pt[1]);
-  const P = POLL.find((x) => x.k === st.poll)!;
-  const s = sample(st.t, st.pt[0], st.pt[1], st.poll), c = AQI[s.cat];
-  const v = pointText(st.t, s, st.poll === 'co');
+  const city = cityOf(st.city), F = activeField(st), inside = !!F && city.built && inBbox(st.pt[0], st.pt[1], city.bbox);
+  const P = POLL.find((x) => x.k === (F?.pollutant ?? st.poll))!;
+  if (!F) return null;
+  const s = sampleField(F, st.t, st.pt[0], st.pt[1]), c = AQI[s.cat];
+  const v = pointText(st.t, s, F.pollutant === 'co');
   const flipX = p.x > sz.x - 260, flipY = p.y < 150;
   const line = { position: 'absolute', opacity: 0.6, pointerEvents: 'none', zIndex: 700 } as const;
   return (
@@ -203,7 +215,7 @@ function PointPopover() {
 }
 
 export const fmtCoords = (pt: LatLng) => pt[0].toFixed(4) + '° N, ' + pt[1].toFixed(4) + '° E';
-export function pointText(t: number, s: ReturnType<typeof sample>, co: boolean) {
+export function pointText(t: number, s: Sample, co: boolean) {
   const r = (n: number) => n.toFixed(co ? 1 : 0);
   const conf = s.coverage > 0.6 && t < 24 ? 'high (dense monitoring)'
     : s.coverage > 0.3 ? 'moderate (' + (t > 36 ? 'longer lead time' : 'moderate monitoring') + ')' : 'low (sparse monitoring)';

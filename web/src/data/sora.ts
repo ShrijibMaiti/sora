@@ -45,12 +45,14 @@ export const aqiIndex = (v: number) => {
 export const UNC = ['#e8f0ff', '#c3d7ff', '#9abcff', '#6e9cff', '#4a80f5', '#3066e0', '#234fbf', '#1a3a8f'];
 
 /* ---------- cities, stations ---------- */
-export type City = { key: string; name: string; built: boolean; status: string; demo_bbox: [number, number, number, number]; center: LatLng; note: string };
+export type Bbox = [number, number, number, number]; // south, west, north, east
+/** bbox = forecast field extent, route_bbox = area with a road graph. Must match sora/config.py (docs/api_contract.md). */
+export type City = { key: string; name: string; built: boolean; status: string; bbox: Bbox; route_bbox: Bbox; center: LatLng; note: string };
 export const CITIES: City[] = [
-  { key: 'delhi', name: 'Delhi', built: true, status: 'Live', demo_bbox: [28.4, 76.84, 28.88, 77.35], center: [28.61, 77.2], note: 'Winter inversions trap traffic exhaust and smoke from upwind crop fires.' },
-  { key: 'kolkata', name: 'Kolkata', built: false, status: 'Preview', demo_bbox: [22.4, 88.2, 22.7, 88.5], center: [22.57, 88.36], note: 'Winter outflow down the Gangetic plain adds to local traffic and industry.' },
-  { key: 'mumbai', name: 'Mumbai', built: false, status: 'Preview', demo_bbox: [18.89, 72.77, 19.27, 73.0], center: [19.07, 72.88], note: 'The sea breeze clears the afternoon; calm winter nights let haze settle.' },
-  { key: 'chennai', name: 'Chennai', built: false, status: 'Preview', demo_bbox: [12.9, 80.15, 13.2, 80.32], center: [13.06, 80.24], note: 'North-east monsoon rain washes the air; Bhogi bonfires spike it in January.' },
+  { key: 'delhi', name: 'Delhi', built: true, status: 'Live', bbox: [28.4, 76.84, 28.88, 77.35], route_bbox: [28.515, 77.18, 28.645, 77.25], center: [28.61, 77.2], note: 'Winter inversions trap traffic exhaust and smoke from upwind crop fires.' },
+  { key: 'kolkata', name: 'Kolkata', built: false, status: 'Preview', bbox: [22.4, 88.2, 22.75, 88.5], route_bbox: [22.52, 88.32, 22.6, 88.4], center: [22.57, 88.36], note: 'Winter outflow down the Gangetic plain adds to local traffic and industry.' },
+  { key: 'mumbai', name: 'Mumbai', built: false, status: 'Preview', bbox: [18.88, 72.77, 19.3, 73.0], route_bbox: [19.0, 72.81, 19.08, 72.89], center: [19.07, 72.88], note: 'The sea breeze clears the afternoon; calm winter nights let haze settle.' },
+  { key: 'chennai', name: 'Chennai', built: false, status: 'Preview', bbox: [12.85, 80.1, 13.25, 80.33], route_bbox: [13.02, 80.21, 13.1, 80.29], center: [13.06, 80.24], note: 'North-east monsoon rain washes the air; Bhogi bonfires spike it in January.' },
 ];
 export const STATIONS: [number, number, string][] = [
   [28.647, 77.316, 'Anand Vihar'], [28.629, 77.241, 'ITO'], [28.674, 77.131, 'Punjabi Bagh'], [28.563, 77.187, 'RK Puram'], [28.636, 77.201, 'Mandir Marg'],
@@ -106,7 +108,7 @@ export const sample = (t: number, lat: number, lon: number, p: PollKey = 'pm25')
   const cov = coverage(lat, lon), spread = 0.11 + 0.0032 * t + 0.2 * (1 - cov);
   return { median: m, p05: m * (1 - spread * 0.85), p95: m * (1 + spread * 1.15), cat: cat(m, p), coverage: cov, spread };
 };
-export const inBbox = (lat: number, lon: number, b = CITIES[0].demo_bbox) => lat >= b[0] && lat <= b[2] && lon >= b[1] && lon <= b[3];
+export const inBbox = (lat: number, lon: number, b: Bbox = CITIES[0].bbox) => lat >= b[0] && lat <= b[2] && lon >= b[1] && lon <= b[3];
 export const cityMean = (t: number, p: PollKey = 'pm25'): Band => {
   let a = 0, lo = 0, hi = 0, n = 0;
   for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) {
@@ -177,15 +179,18 @@ export type PlanQuery = {
   city?: string; earliest?: string; latest_departure?: string; latest_arrival?: string | null;
   max_extra_min?: number; origin_building?: BuildingKey; force_unreliable?: boolean;
 };
+/** View model of an option: departure as IST "HH:MM" plus minutes-of-day; departure_iso is set when it came from the API. */
 export type TripOption = {
-  id: RouteId; label: string; departure: string; departure_min: number; travel_min: number; distance_km: number;
+  id: RouteId; label: string; departure: string; departure_min: number; departure_iso?: string; travel_min: number; distance_km: number;
   dose: Band; reduction_pct: Band; p_better: number | null; extra_min: number; path: LatLng[];
 };
 export type PlanOk = {
   error?: undefined; baseline: TripOption; options: TripOption[]; recommended: RouteId; reliable: boolean; explanation: string[]; caveats: string[];
   degradation: string; window: { start: string; end: string };
 };
-export type PlanErr = { error: 'no_feasible' | 'outside' | 'missing'; fastest?: number };
+/** error = API error code (docs/api_contract.md) or 'missing' when the form lacks a start/destination. */
+export const PLAN_ERRORS = ['missing', 'invalid', 'outside', 'no_route', 'no_feasible', 'beyond_horizon', 'not_built'] as const;
+export type PlanErr = { error: (typeof PLAN_ERRORS)[number]; message?: string; fastest?: number };
 export type PlanResult = PlanOk | PlanErr;
 
 /* POST /api/plan */

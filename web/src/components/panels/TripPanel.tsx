@@ -27,17 +27,22 @@ export function TripPanel() {
       {st.editTrip && <TripForm onSubmit={submit} />}
 
       {res?.error && (() => {
-        const E = {
-          no_feasible: ['clock-alert', 'No departure meets your arrival time', `The fastest option takes about ${res.fastest} min. Widen the departure window or set a later arrival.`, 'Clear arrival time', () => { set({ demo: 'none' }); setTrip({ latest: '' }, true); }],
-          outside: ['map-pin-off', 'Point outside the covered area', "Sora's Delhi model covers 28.40–28.88° N and 76.84–77.35° E. Choose a start and destination inside it.", 'Use Saket → Connaught Place', () => setTrip({ origin: 'saket', dest: 'cp' }, true)],
-          missing: ['map-pin', 'Choose a start and destination', 'Search, pick from the list, or click the map.', 'Use an example', () => setTrip({ origin: 'saket', dest: 'cp' }, true)],
-        }[res.error] as [string, string, string, string, () => void];
+        /* keyed by API error code (docs/api_contract.md); the server's message is the body text */
+        const example = () => setTrip({ origin: 'saket', dest: 'cp' }, true);
+        const E = ({
+          no_feasible: ['clock-alert', 'No departure meets your arrival time', 'Clear arrival time', () => { set({ demo: 'none' }); setTrip({ latest: '' }, true); }],
+          outside: ['map-pin-off', 'Point outside the routable area', 'Use Saket → Connaught Place', example],
+          no_route: ['route', 'No route for this mode', 'Use Saket → Connaught Place', example],
+          missing: ['map-pin', 'Choose a start and destination', 'Use an example', example],
+          beyond_horizon: ['clock-alert', 'Outside the forecast window', 'Leave at 18:15', () => setTrip({ dep: '18:15' }, true)],
+        } as Record<string, [string, string, string, () => void]>)[res.error] ?? ['circle-slash', 'This trip could not be planned', 'Try again', runPlan];
+        const body = res.message || 'Search, pick from the list, or click the map.';
         return (
           <section role="alert" className="sec">
             <span className="eyebrow" style={{ color: 'var(--danger)', display: 'flex', gap: 8, alignItems: 'center' }}><Icon name={E[0]} size={14} />Can't plan this trip</span>
             <h2 style={{ margin: 0, fontSize: 22, fontWeight: 400, letterSpacing: '-.02em' }}>{E[1]}</h2>
-            <p className="lede">{E[2]}</p>
-            <button className="btn-outline" style={{ alignSelf: 'flex-start' }} onClick={E[4]}>{E[3]}</button>
+            <p className="lede">{body}</p>
+            <button className="btn-outline" style={{ alignSelf: 'flex-start' }} onClick={E[3]}>{E[2]}</button>
           </section>
         );
       })()}

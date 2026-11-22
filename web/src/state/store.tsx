@@ -1,9 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Map as LeafletMap } from 'leaflet';
 import {
-  CITIES, PATHS, PLACES, hhmm, inBbox, plan, toMin,
-  type BuildingKey, type LatLng, type ModeKey, type PlanResult, type PollKey, type RouteId, type TripOption,
+  CITIES, PLACES, PLAN_ERRORS, POLL, WHATIF,
+  type BuildingKey, type City, type LatLng, type ModeKey, type PlanOk, type PlanResult, type PollKey, type RouteId, type TripOption,
 } from '../data/sora';
+import { ApiError, api, type DayView } from '../api/client';
+import type { ApiEvent, Change, CounterfactualResponse, DayRequest, Field, PlanRequest } from '../api/types';
+import { fieldSeries } from '../lib/field';
+import { HOUR_MS, hourIndex, istTimeOnOrAfter } from '../lib/time';
 
 export type Tab = 'live' | 'trip' | 'day' | 'what' | 'ins';
 export type Demo = 'none' | 'loading' | 'offline' | 'degraded' | 'unreliable' | 'nofeasible' | 'notbuilt';
@@ -12,6 +16,7 @@ export type Trip = {
   origin: string; dest: string; mode: ModeKey; dep: string; win: string; latest: string; maxExtra: number; ob: BuildingKey; db: BuildingKey;
 };
 export type SubTabs = { live: 'overview' | 'poll' | 'events' | 'data'; trip: 'options' | 'why' | 'chart'; day: 'schedule' | 'result' | 'changes' | 'timeline' };
+export type WhatIfAnswer = CounterfactualResponse | 'error' | null;
 
 export type State = {
   w: number; h: number; booting: boolean; theme: Theme;
@@ -23,12 +28,26 @@ export type State = {
   sheet: number; drag: number | null;
   prefs: { mode: ModeKey; bld: BuildingKey; extra: number };
   sub: SubTabs;
+  /* API data */
+  cities: City[]; reload: number;
+  fields: Partial<Record<PollKey, Field | 'unavailable'>>;
+  events: ApiEvent[]; day: DayView | null; whatif: WhatIfAnswer[];
 };
 
 const store = {
   get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } },
 };
+
+/* City list from GET /api/cities; module-level so cityOf() stays synchronous. Static list until it loads. */
+let CITY_LIST: City[] = CITIES;
+export const cityOf = (key: string) => CITY_LIST.find((c) => c.key === key) || CITY_LIST[0];
+
+/** Field for the selected pollutant, falling back to PM2.5 while it loads. */
+export function activeField(st: State): Field | null {
+  const f = st.fields[st.poll], pm = st.fields.pm25;
+  return f && f !== 'unavailable' ? f : pm && pm !== 'unavailable' ? pm : null;
+}
 
 function initialState(): State {
   const theme = (store.get('sora.theme') as Theme) || 'dark';
@@ -38,7 +57,7 @@ function initialState(): State {
     w: window.innerWidth || 1280, h: window.innerHeight || 800, booting: true, theme,
     tab: tabMap[hash.get('tab') || ''] || 'live', panelOpen: true,
     city: hash.get('city') && CITIES.some((c) => c.key === hash.get('city')) ? hash.get('city')! : 'delhi',
-    t: 5, playing: false, poll: 'pm25', unc: false, lay: { stations: true, wind: false, fires: true },
+    t: 0, playing: false, poll: 'pm25', unc: false, lay: { stations: true, wind: false, fires: true },
     layersOpen: false, legendOpen: false, pt: null, cityOpen: false, menuOpen: false, searchOpen: false, searchQ: '',
     trip: { origin: 'saket', dest: 'cp', mode: 'car_ac', dep: '18:15', win: '90', latest: '', maxExtra: 15, ob: 'naturally_ventilated', db: 'ac_sealed' },
     custom: {}, pick: null, res: null, sel: 'B', planning: false, editTrip: false,
@@ -47,51 +66,68 @@ function initialState(): State {
     sheet: 1, drag: null,
     prefs: { mode: 'car_ac', bld: 'naturally_ventilated', extra: 15 },
     sub: { live: 'overview', trip: 'options', day: 'result' },
+    cities: CITIES, reload: 0, fields: {}, events: [], day: null, whatif: WHATIF.map(() => null),
   };
 }
 
 export const placeLL = (st: State, k: string): LatLng | undefined =>
   k.startsWith('custom_') ? st.custom[k.slice(7)] : PLACES.find((p) => p.k === k)?.ll;
 
-/** Wraps POST /api/plan with the prototype's client-side adjustments (custom endpoints, demo states). */
-export function computePlan(st: State, trip: Trip): PlanResult {
-  const o = placeLL(st, trip.origin), d = placeLL(st, trip.dest);
-  if (!o || !d) return { error: 'missing' };
-  if (!inBbox(o[0], o[1]) || !inBbox(d[0], d[1])) return { error: 'outside' };
-  const dm = toMin(trip.dep), win = +trip.win;
-  const q = {
-    city: st.city, mode: trip.mode, planned_departure: trip.dep, earliest: hhmm(dm - win), latest_departure: hhmm(dm + win),
-    latest_arrival: trip.latest || null, max_extra_min: +trip.maxExtra, origin_building: trip.ob, dest_building: trip.db, force_unreliable: st.demo === 'unreliable',
+/** POST /api/plan body from the trip form. Form times are IST "HH:MM", placed at or after the forecast start. */
+export function planRequest(st: State, F: Field): PlanRequest | { error: 'missing'; message: string } {
+  const o = placeLL(st, st.trip.origin), d = placeLL(st, st.trip.dest), t = st.trip;
+  if (!o || !d) return { error: 'missing', message: 'Choose a start and destination.' };
+  const t0 = F.times[0], dep = istTimeOnOrAfter(t.dep, t0), depMs = Date.parse(dep), win = +t.win * 60e3;
+  const earliest = new Date(Math.max(depMs - win, Date.parse(t0))).toISOString();
+  let latestArrival = t.latest ? istTimeOnOrAfter(t.latest, earliest) : null;
+  if (st.demo === 'nofeasible') latestArrival = new Date(Date.parse(earliest) + 10 * 60e3).toISOString();
+  return {
+    city: st.city, origin: o, dest: d, mode: t.mode, planned_departure: dep, earliest, latest_departure: new Date(depMs + win).toISOString(),
+    latest_arrival: latestArrival, max_extra_min: +t.maxExtra, origin_building: t.ob, dest_building: t.db,
   };
-  if (st.demo === 'nofeasible') q.latest_arrival = hhmm(dm - win + 10);
-  const res = plan(q);
-  if (res.error) return res;
-  const hv = (a: LatLng, b: LatLng) => Math.hypot(a[0] - b[0], (a[1] - b[1]) * 0.88);
-  const P = PATHS.plan, base = hv(P[0], P[P.length - 1]), k = Math.max(0.25, hv(o, d) / base);
-  const isDefault = trip.origin === 'saket' && trip.dest === 'cp';
-  const mkPath = (off: number, wig: number): LatLng[] => {
-    const pts: LatLng[] = [], n = 10, dx = d[0] - o[0], dy = d[1] - o[1], Ln = Math.hypot(dx, dy) || 1;
-    for (let i = 0; i <= n; i++) {
-      const s = i / n, b = Math.sin(Math.PI * s);
-      pts.push([o[0] + dx * s + (-dy / Ln) * off * b * Ln + wig * Math.sin(s * 9) * b * 0.003, o[1] + dy * s + ((dx / Ln) * off * b * Ln) / 0.88]);
-    }
-    return pts;
-  };
-  const offs: Record<RouteId, [number, number]> = { plan: [0, 1], A: [-0.14, 1.5], B: [0.06, 1], C: [0.18, 0.6] };
-  [res.baseline, ...res.options].forEach((x: TripOption) => {
-    if (!isDefault) x.path = mkPath(offs[x.id][0], offs[x.id][1]);
-    x.distance_km = +(x.distance_km * k).toFixed(1);
-    x.travel_min = Math.max(4, Math.round(x.travel_min * k));
-    x.extra_min = Math.round(x.extra_min * Math.min(1, k + 0.2));
-    (['median', 'p05', 'p95'] as const).forEach((q) => (x.dose[q] = Math.max(2, Math.round(x.dose[q] * k))));
-    if (st.demo === 'degraded' && x.p_better != null) x.p_better = +(x.p_better * 0.82).toFixed(2);
-  });
-  if (st.demo === 'degraded') res.reliable = (res.options[1].p_better ?? 0) >= 0.7;
-  if (trip.win === '0') res.options.forEach((x) => { x.departure = res.baseline.departure; x.departure_min = res.baseline.departure_min; });
+}
+
+/** Preview-state adjustments (profile menu → Preview states); a no-op in normal use. */
+function applyDemoToPlan(st: State, res: PlanOk): PlanOk {
+  if (st.demo === 'degraded') {
+    [res.baseline, ...res.options].forEach((x) => { if (x.p_better != null) x.p_better = +(x.p_better * 0.82).toFixed(2); });
+    res.reliable = (res.options.find((o) => o.id === res.recommended)?.p_better ?? 0) >= 0.7;
+  }
+  if (st.demo === 'unreliable') res.reliable = false;
   return res;
 }
 
+/* What-if questions → POST /api/counterfactual changes (labels/icons are UI copy). */
+export const QUESTIONS = WHATIF.map((w) => ({ q: w.q, icon: w.icon }));
+function questionChanges(F: Field): Change[] {
+  const gymB = PLACES.find((p) => p.k === 'greenpark')!.ll;
+  const ser = fieldSeries(F).slice(0, 24), peak = ser.reduce((b, s, i) => (s.median > ser[b].median ? i : b), 0);
+  const peakMs = Date.parse(F.times[peak]);
+  return [
+    { kind: 'shift_departure', minutes: 30 },
+    { kind: 'mode', mode: 'metro' },
+    { kind: 'destination', dest: gymB, dest_building: 'ac_filtered' },
+    { kind: 'stay_indoors', start: new Date(peakMs - HOUR_MS).toISOString(), end: new Date(peakMs + 2 * HOUR_MS).toISOString() },
+  ];
+}
+
+/* The sample day shown in Plan my day (until the schedule editor exists): Home → College → Gym (2 choices) → Restaurant → Home. */
+function sampleDay(st: State): DayRequest {
+  const P = (k: string) => { const p = PLACES.find((x) => x.k === k)!; return { label: p.name, lat: p.ll[0], lon: p.ll[1] }; };
+  return {
+    city: st.city, mode: 'auto', max_extra_min: st.prefs.extra,
+    stops: [
+      { name: 'Home', place: P('lajpat'), building: 'naturally_ventilated', activity: 'rest' },
+      { name: 'College', place: P('iitd'), duration_min: 455, building: 'naturally_ventilated', activity: 'light' },
+      { name: 'Gym', place: P('hkv'), alternatives: [P('greenpark')], duration_min: 75, building: 'naturally_ventilated', activity: 'high' },
+      { name: 'Restaurant', place: P('khan'), duration_min: 105, building: 'ac_sealed', activity: 'light' },
+      { name: 'Home', place: P('lajpat'), building: 'naturally_ventilated', activity: 'rest' },
+    ],
+  };
+}
+
 type Patch = Partial<State> | ((s: State) => Partial<State>);
+const isOffline = (e: unknown) => !(e instanceof ApiError) || e.status === 0 || e.status >= 500;
 
 function useSoraStore() {
   const [st, setSt] = useState<State>(initialState);
@@ -101,6 +137,7 @@ function useSoraStore() {
   const searchElRef = useRef<HTMLInputElement | null>(null);
   const rm = useMemo(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches, []);
   const timers = useRef<{ plan?: number }>({});
+  const seq = useRef({ plan: 0, whatif: 0 });
 
   const set = useCallback((p: Patch) => {
     setSt((s) => {
@@ -111,20 +148,52 @@ function useSoraStore() {
   }, []);
 
   const jumpTo = useCallback((o?: TripOption) => {
-    if (!o) return;
-    set({ t: Math.max(0, Math.min(72, Math.round((o.departure_min - 840) / 60))) });
+    const F = activeField(ref.current);
+    if (!o?.departure_iso || !F) return;
+    set({ t: Math.max(0, Math.min(F.times.length - 1, Math.round(hourIndex(o.departure_iso, F.times[0])))) });
   }, [set]);
 
-  const runPlan = useCallback(() => {
+  /** jump=false keeps the time slider where it is (used for the plan fetched at load). */
+  const runPlan = useCallback((jump: unknown = true) => {
     set({ planning: true });
     clearTimeout(timers.current.plan);
-    timers.current.plan = window.setTimeout(() => {
-      const s = ref.current, res = computePlan(s, s.trip);
+    timers.current.plan = window.setTimeout(async () => {
+      const id = ++seq.current.plan, s = ref.current, F = s.fields.pm25;
+      if (!F || F === 'unavailable') { set({ planning: false }); return; }
+      const req = planRequest(s, F);
+      let res: PlanResult;
+      if ('error' in req) res = req;
+      else {
+        try { res = applyDemoToPlan(ref.current, await api.plan(req)); }
+        catch (e) {
+          if (id !== seq.current.plan) return;
+          if (isOffline(e)) { set({ planning: false, offline: true }); return; }
+          const a = e as ApiError, known = PLAN_ERRORS.find((c) => c === a.code);
+          res = { error: known ?? 'invalid', message: a.message, fastest: a.extra.fastest_min as number | undefined };
+        }
+      }
+      if (id !== seq.current.plan) return;
       const sel = (!res.error && res.recommended) || 'B';
       set({ res, planning: false, sel });
-      if (!res.error) jumpTo(res.options.find((o) => o.id === sel));
-    }, 550);
+      if (!res.error && jump !== false) jumpTo([res.baseline, ...res.options].find((o) => o.id === sel));
+    }, 200);
   }, [set, jumpTo]);
+
+  const askWhatIf = useCallback(async () => {
+    const id = ++seq.current.whatif, s = ref.current, F = s.fields.pm25;
+    if (!F || F === 'unavailable') return;
+    const req = planRequest(s, F);
+    if ('error' in req) return;
+    set({ whatif: QUESTIONS.map(() => null) });
+    const answers = await Promise.all(questionChanges(F).map((change) => api.counterfactual({ plan: req, change }).catch(() => 'error' as const)));
+    if (id === seq.current.whatif) set({ whatif: answers });
+  }, [set]);
+
+  const loadDay = useCallback(async () => {
+    set({ dayBusy: true });
+    try { set({ day: await api.day(sampleDay(ref.current)), dayBusy: false, dayDone: true }); }
+    catch (e) { set({ dayBusy: false, ...(isOffline(e) ? { offline: true } : {}) }); }
+  }, [set]);
 
   const selectOpt = useCallback((id: RouteId) => {
     const res = ref.current.res;
@@ -139,7 +208,7 @@ function useSoraStore() {
 
   const applyDemo = useCallback((k: Demo) => {
     const base = { demo: k, menuOpen: false, offline: k === 'offline' };
-    if (k === 'loading') { set({ ...base, booting: true, demo: 'none' }); setTimeout(() => set({ booting: false }), 1600); return; }
+    if (k === 'loading') { set((s) => ({ ...base, demo: 'none', reload: s.reload + 1 })); return; }
     if (k === 'notbuilt') { set({ ...base, city: 'kolkata' }); return; }
     if (k === 'unreliable' || k === 'nofeasible') { set({ ...base, tab: 'trip', panelOpen: true, city: 'delhi' }); runPlan(); return; }
     set((s) => ({ ...base, city: k === 'none' ? 'delhi' : s.city }));
@@ -159,11 +228,10 @@ function useSoraStore() {
 
   const openSearch = useCallback(() => { set({ searchOpen: true }); requestAnimationFrame(() => searchElRef.current?.focus()); }, [set]);
 
-  /* mount: boot, resize, keyboard, play loop */
+  /* mount: cities, resize, keyboard, play loop */
   useEffect(() => {
     document.documentElement.dataset.theme = ref.current.theme;
-    set((s) => ({ res: computePlan(s, s.trip) }));
-    const boot = setTimeout(() => set({ booting: false }), 900);
+    api.cities().then((list) => { CITY_LIST = list; set({ cities: list }); }, () => { /* keep the static list; field load reports offline */ });
     const onR = () => set({ w: window.innerWidth, h: window.innerHeight });
     const onK = (e: KeyboardEvent) => {
       if (e.key === 'Escape') set({ cityOpen: false, menuOpen: false, searchOpen: false, layersOpen: false, pt: null, pick: null });
@@ -172,11 +240,39 @@ function useSoraStore() {
     };
     window.addEventListener('resize', onR);
     window.addEventListener('keydown', onK);
-    const iv = setInterval(() => { if (ref.current.playing && !document.hidden) set((s) => ({ t: (s.t + 1) % 73 })); }, rm ? 1500 : 700);
-    return () => { clearTimeout(boot); clearInterval(iv); window.removeEventListener('resize', onR); window.removeEventListener('keydown', onK); };
+    const iv = setInterval(() => {
+      const s = ref.current, F = activeField(s);
+      if (s.playing && F && !document.hidden) set({ t: (s.t + 1) % F.times.length });
+    }, rm ? 1500 : 700);
+    return () => { clearInterval(iv); window.removeEventListener('resize', onR); window.removeEventListener('keydown', onK); };
   }, [set, rm, openSearch]);
 
-  return { st, set, ref, mapRef, searchElRef, rm, runPlan, selectOpt, setTrip, applyDemo, toggleTheme, finishOnboarding, flyTo, openSearch };
+  /* city (or retry): PM2.5 field first, then plan, events, day and the other pollutants */
+  useEffect(() => {
+    let live = true;
+    const city = st.city;
+    set({ booting: true, fields: {}, events: [], res: null, day: null, pt: null, t: 0 });
+    (async () => {
+      try {
+        const pm = await api.field(city, 'pm25');
+        if (!live) return;
+        set({ fields: { pm25: pm }, booting: false, offline: false });
+        runPlan(false);
+        loadDay();
+        api.events(city).then((ev) => live && set({ events: ev }), () => {});
+        POLL.filter((p) => p.k !== 'pm25').forEach((p) => api.field(city, p.k).then(
+          (f) => live && set((s) => ({ fields: { ...s.fields, [p.k]: f } })),
+          () => live && set((s) => ({ fields: { ...s.fields, [p.k]: 'unavailable' }, poll: s.poll === p.k ? 'pm25' : s.poll })),
+        ));
+      } catch (e) {
+        if (!live) return;
+        set({ booting: false, offline: isOffline(e) });
+      }
+    })();
+    return () => { live = false; };
+  }, [st.city, st.reload, set, runPlan, loadDay]);
+
+  return { st, set, ref, mapRef, searchElRef, rm, runPlan, askWhatIf, loadDay, selectOpt, setTrip, applyDemo, toggleTheme, finishOnboarding, flyTo, openSearch };
 }
 
 export type Sora = ReturnType<typeof useSoraStore>;
@@ -192,5 +288,3 @@ export function useSora() {
   if (!v) throw new Error('useSora must be used inside <SoraProvider>');
   return v;
 }
-
-export const cityOf = (key: string) => CITIES.find((c) => c.key === key) || CITIES[0];

@@ -1,0 +1,184 @@
+# Sora API contract (v1)
+
+Single source of truth for the HTTP API between `web/` and the FastAPI backend (`sora/api/`).
+Spec references (§) point to `docs/sora_master_spec.md`. Wire types live in `web/src/api/types.ts`;
+the frontend mock (`web/src/api/mock.ts`) implements exactly this contract.
+
+## Conventions
+
+- Base path `/api`. JSON in and out. In dev, Vite forwards `/api` to `http://127.0.0.1:8000`.
+- **Times are ISO 8601 with offset** (`2026-11-21T18:15:00+05:30` or `…Z`). The UI displays IST.
+- Coordinates are `[lat, lon]` in WGS84 decimal degrees. Bounding boxes are `[south, west, north, east]`.
+- Ranges are `Band = { median, p05, p95 }` (90% interval, spec §19).
+- Concentrations in µg/m³ (CO in mg/m³); doses in µg (spec §22.3).
+- **Errors:** any non-2xx response has the body
+
+  ```json
+  { "detail": { "code": "outside", "message": "Start point is outside the routable area for Delhi.", "fastest_min": 42 } }
+  ```
+
+  `code` is machine-readable, `message` is safe to show to users, extra fields are optional.
+  This is what FastAPI produces for `HTTPException(status_code, detail={...})`.
+
+| code | HTTP | meaning |
+|---|---|---|
+| `invalid` | 400 | Request failed validation (bad time window, unknown mode/building) |
+| `outside` | 400 | Origin or destination outside the city's `route_bbox` |
+| `no_route` | 400 | No path between the points for this mode |
+| `no_feasible` | 400 | No departure meets `latest_arrival`; `fastest_min` included |
+| `not_built` | 404 | City exists but its model is not live yet |
+| `unavailable` | 404 | Pollutant not forecast for this city (MVP forecasts PM2.5 only) |
+| `unknown_city` | 404 | City key not recognised |
+| `beyond_horizon` | 400 | Requested times fall outside the 0–72 h forecast |
+
+## GET /api/cities
+
+```ts
+City[] = {
+  key: string; name: string;
+  built: boolean; status: "Live" | "Preview";
+  bbox: Bbox;        // forecast field extent (backend config.City.bbox)
+  route_bbox: Bbox;  // area with a road graph; trips must start and end inside it (config.City.route_bbox)
+  center: LatLng; note: string;
+}[]
+```
+
+## GET /api/field?city={key}&pollutant={pm25|pm10|no2|o3|so2|co}
+
+Hourly forecast field for one pollutant, 0–72 h (spec §18). Errors: `not_built`, `unavailable`, `unknown_city`.
+
+```ts
+{
+  city: string; pollutant: PollKey; unit: "µg/m³" | "mg/m³";
+  times: ISO[];                  // hourly, times[0] = analysis hour
+  lats: number[]; lons: number[];// ascending grid axes, any resolution
+  median: number[][][];          // [t][lat][lon]
+  p05: number[][][]; p95: number[][][];
+  coverage: number[][];          // [lat][lon], 0–1 observation coverage (spec §19.7)
+  stations: { name: string; lat: number; lon: number; reporting: boolean }[];
+  fires: LatLng[];               // active fire detections (spec §11.3)
+  wind: { dir_deg: number[]; speed_ms: number[] };  // city-mean per hour, same length as times; dir = direction wind blows TO
+  meta: {
+    analysis_time: ISO; next_update: ISO; built_at: ISO;
+    degradation: "L0" | "L1" | "L2" | "L3" | "L4" | "L5" | "L6" | "L7";  // spec §39
+    n_stations: number; n_reporting: number;
+    background: string;          // e.g. "CAMS 00 UTC run"
+  }
+}
+```
+
+AQI category is derived on the client from the CPCB breakpoints (`web/src/data/sora.ts` `BP`), so it is not sent.
+
+## POST /api/plan
+
+Route × departure-time options for one trip (spec §23, §24, §31).
+
+Request:
+
+```ts
+{
+  city: string; origin: LatLng; dest: LatLng;
+  mode: "walk" | "cycle" | "two_wheeler" | "auto" | "car_ac" | "bus" | "metro";
+  planned_departure: ISO; earliest: ISO; latest_departure: ISO; latest_arrival: ISO | null;
+  max_extra_min: number;
+  origin_building: "naturally_ventilated" | "ac_sealed" | "ac_filtered";
+  dest_building:   "naturally_ventilated" | "ac_sealed" | "ac_filtered";
+}
+```
+
+Response:
+
+```ts
+{
+  baseline: Option;              // id "plan": the user's own plan
+  options: Option[];             // ids "A" lowest exposure, "B" balanced, "C" fastest
+  recommended: "A" | "B" | "C";
+  reliable: boolean;             // false → "options not reliably different today" (spec §31.7)
+  explanation: string[]; caveats: string[];
+  degradation: string;
+  window: { start: ISO; end: ISO };
+}
+Option = {
+  id: "plan" | "A" | "B" | "C"; label: string;
+  departure: ISO; travel_min: number; distance_km: number;
+  dose: Band;                    // µg over the window (spec §22)
+  reduction_pct: Band;           // vs baseline, positive = lower dose
+  p_better: number | null;       // paired P(dose < baseline), null for baseline (spec §31.5)
+  extra_min: number;
+  path: LatLng[];
+}
+```
+
+Errors: `invalid`, `outside`, `no_route`, `no_feasible`, `beyond_horizon`, `not_built`.
+
+## POST /api/day
+
+Whole-day schedule optimization (spec §25).
+
+Request:
+
+```ts
+{
+  city: string; mode: Mode; max_extra_min: number;
+  stops: {
+    name: string;                // "Home", "College", "Gym"…
+    place: { label: string; lat: number; lon: number };
+    alternatives?: { label: string; lat: number; lon: number }[];  // location choice (spec §25.4)
+    arrive_after?: ISO; leave_before?: ISO; duration_min?: number;
+    building: Building;
+    activity?: "rest" | "light" | "moderate" | "high";
+  }[];
+}
+```
+
+Response:
+
+```ts
+{
+  stops: { name: string; place: string; icon: string; window: string; duration: string; building: string }[];  // display rows
+  original:  { segments: Segment[]; total: Band };
+  optimized: { segments: Segment[]; total: Band };
+  changes: { icon: string; title: string; detail: string; delta_ug: number }[];
+  reduction_pct: Band; p_better: number; extra_min: number;
+}
+Segment = { me: "home"|"road"|"vehicle"|"metro"|"work"|"gym"|"restaurant"; start: ISO; end: ISO; dose: number; label?: string }
+```
+
+## POST /api/counterfactual
+
+"What if" on a planned trip (spec §26).
+
+Request: `{ plan: PlanRequest; change: Change }` where
+
+```ts
+Change =
+  | { kind: "shift_departure"; minutes: number }
+  | { kind: "mode"; mode: Mode }
+  | { kind: "destination"; dest: LatLng; dest_building?: Building }
+  | { kind: "stay_indoors"; start: ISO; end: ISO }
+```
+
+Response: `{ delta_pct: Band; p_better: number; verdict: string; reason: string }`
+(`delta_pct` negative = lower dose; `p_better` = chance the change lowers the dose).
+
+## GET /api/events?city={key}
+
+Abnormal-episode alerts (spec §30).
+
+```ts
+{ kind: "fire" | "inversion" | "dust" | "festival" | "rain" | "traffic" | "industrial";
+  title: string; body: string; start: ISO; end: ISO | null;
+  severity: "warning" | "info" | "success"; probability: number }[]
+```
+
+## Not an endpoint: Insights
+
+Exposure history, trends and proactive suggestions are computed **on the device** from the user's
+own trajectory history (spec §27, §40, §41.3). Raw location history never goes to the server, so
+there is deliberately no `/api/insights`. The current Insights screen shows sample history.
+
+## Routable area (Delhi)
+
+`route_bbox` must cover every place a demo trip uses. Delhi: `[28.515, 77.18, 28.645, 77.25]`
+(Saket → Connaught Place, Lajpat Nagar, IIT Delhi, Hauz Khas, Green Park, Khan Market).
+Backend: `sora/config.py` `City.route_bbox`; road graph fetched for exactly this box.

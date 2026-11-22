@@ -14,8 +14,21 @@ npm run build    # typecheck + production build
 ```
 
 - `src/design/tokens.css` – design tokens (source of truth, see `DESIGN.md`)
-- `src/data/sora.ts` – deterministic Delhi mock model + `/api/plan` stand-in (port of `sora-kit.js`)
-- `src/state/store.tsx` – app state, plan runner, demo states, theme, onboarding
+- `src/api/` – API layer for [`docs/api_contract.md`](../docs/api_contract.md): `types.ts` (wire types), `client.ts` (fetch + wire→view), `mock.ts` (in-browser backend)
+- `src/data/sora.ts` – deterministic Delhi model behind the mock; also illustrative content for the landing page and styleguide
+- `src/lib/field.ts`, `src/lib/time.ts` – reading values out of `/api/field`, IST time helpers
+- `src/state/store.tsx` – app state, API loading, plan runner, demo states, theme, onboarding
+
+### Mock vs real backend
+
+The app uses the in-browser mock by default. To call the FastAPI backend on `:8000` (Vite forwards `/api` in `dev` and `preview`):
+
+```
+VITE_USE_MOCK=false npm run dev                                  # macOS/Linux
+$env:VITE_USE_MOCK='false'; npm run dev                          # PowerShell
+```
+
+If the backend is down the app shows "Can't reach Sora" instead of falling back to fake data.
 - `src/lib/layout.ts` – rail/panel/overlay geometry per viewport
 - `src/components/` – rail, map (Leaflet), map chrome, side panel sections, overlays, insights
 - `src/landing/` – Landing v2 page and its stylesheet
