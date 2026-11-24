@@ -109,6 +109,12 @@ Response:
   explanation: string[]; caveats: string[];
   degradation: string;
   window: { start: ISO; end: ISO };
+  front?: { departure: ISO; travel_min: number; extra_min: number; dose: Band; risk: number }[];
+                                 // Pareto front: feasible departure × route pairs nothing beats on both travel time
+                                 // and risk-aware dose, fastest first (spec §31.1)
+  robustness?: { margin_pct: number; where: string; unmonitored: boolean } | null;
+                                 // for the recommendation when reliable: how much worse than forecast the air along
+                                 // `where` would have to be for it to stop beating the plan (spec §31.5–31.6)
 }
 Option = {
   id: "plan" | "A" | "B" | "C"; label: string;
@@ -118,8 +124,16 @@ Option = {
   p_better: number | null;       // paired P(dose < baseline), null for baseline (spec §31.5)
   extra_min: number;
   path: LatLng[];
+  segments?: { label: string; kind: "indoor" | "access" | "road"; minutes: number; dose: number }[];
+                                 // where the dose comes from (spec §22.4), on the median field, largest first
 }
 ```
+
+Options compete on the risk-aware dose `0.5·mean + 0.5·CVaR₉₀` over the samples (spec §31.2): A has the lowest,
+B is the knee with small penalties for extra travel and moving the departure, C is the fastest. With
+`latest_arrival`, an option is feasible only if it arrives in time on at least 90% of samples, travel times varying
+by mode (spec §31.3). Indoor time uses the dynamic mass-balance model (spec §21.3). `front`, `robustness` and
+`segments` are absent from the in-browser mock.
 
 Errors: `invalid`, `outside`, `no_route`, `no_feasible`, `beyond_horizon`, `not_built`.
 

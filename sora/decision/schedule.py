@@ -11,8 +11,8 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ..exposure import dose as dosing
-from ..exposure.microenv import BUILDING, BUILDING_LABEL, MODES, VENT
-from . import confidence
+from ..exposure.microenv import BUILDING_LABEL, MODES, VENT
+from . import confidence, risk
 from .routing import Ctx, PlanError, endpoints, free_minutes, iso, leg
 
 DAY_START, DAY_END = 7 * 60, 23 * 60  # minutes after IST midnight
@@ -57,7 +57,7 @@ class Sim:
 
     @property
     def score(self):
-        return float(self.total.mean())  # expected dose (spec §31.2)
+        return risk.risk(self.total)  # risk-aware dose, the default criterion (spec §31.2)
 
 
 class Day:
@@ -95,7 +95,7 @@ class Day:
     def dwell(self, i, choice, a, b):
         p, bld = self.place(i, choice)
         vent = VENT[self.req.stops[i].activity or "light"]
-        pieces = dosing.dwell(self.ctx.h(self.ts(a)), self.ctx.h(self.ts(b)), p.lat, p.lon, BUILDING[bld], vent, bld)
+        pieces = dosing.dwell(self.ctx.h(self.ts(a)), self.ctx.h(self.ts(b)), p.lat, p.lon, bld, vent)
         return dosing.dose(self.ctx.ens, self.ctx.lats, self.ctx.lons, pieces)
 
     def simulate(self, choice, shift) -> Sim:

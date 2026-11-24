@@ -1,5 +1,5 @@
 /* Wire types for the Sora HTTP API. Keep in sync with docs/api_contract.md. */
-import type { Band, Bbox, BuildingKey, City, LatLng, MeKey, ModeKey, PollKey, RouteId } from '../data/sora';
+import type { Band, Bbox, BuildingKey, City, DoseSegment, FrontPoint, LatLng, MeKey, ModeKey, PollKey, RouteId } from '../data/sora';
 
 export type ISO = string;
 export type { Band, Bbox, City, LatLng };
@@ -26,10 +26,12 @@ export type PlanRequest = {
 export type WireOption = {
   id: RouteId; label: string; departure: ISO; travel_min: number; distance_km: number;
   dose: Band; reduction_pct: Band; p_better: number | null; extra_min: number; path: LatLng[];
+  segments?: DoseSegment[]; // absent from the in-browser mock
 };
 export type PlanResponse = {
   baseline: WireOption; options: WireOption[]; recommended: Exclude<RouteId, 'plan'>; reliable: boolean;
   explanation: string[]; caveats: string[]; degradation: string; window: { start: ISO; end: ISO };
+  front?: FrontPoint[]; robustness?: { margin_pct: number; where: string; unmonitored: boolean } | null;
 };
 
 export type Place = { label: string; lat: number; lon: number };

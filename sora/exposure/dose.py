@@ -1,7 +1,7 @@
 """Inhaled dose on joint field samples (spec §22.1): E = Σ C^μ(x, t) · V̇ · Δt, one value per sample."""
 import numpy as np
 
-DWELL_STEP_MIN = 15
+from . import indoor
 
 
 class Pieces:
@@ -54,12 +54,8 @@ def dose(ens, lats, lons, p: Pieces):
     return (conc(ens["C"], lats, lons, h, lat, lon) * mult * w).sum(1)
 
 
-def dwell(h_a, h_b, lat, lon, factor, vent_lpm, cat):
-    """Indoor time at a place from hour h_a to h_b, in 15-min pieces."""
-    p = Pieces()
-    if h_b <= h_a:
-        return p
-    step = DWELL_STEP_MIN / 60
-    edges = np.append(np.arange(h_a, h_b, step), h_b)
-    mins = np.diff(edges) * 60
-    return p.add((edges[:-1] + edges[1:]) / 2, lat, lon, mins * vent_lpm / 1000 * factor, cat)
+def dwell(h_a, h_b, lat, lon, building, vent_lpm):
+    """Indoor time at a place from hour h_a to h_b, through the dynamic indoor model (spec §21.3): the pieces are
+    outdoor concentrations at and before the stay, weighted by how much of each reaches the person inside."""
+    t, w = indoor.dose_weights(h_a, h_b, building, vent_lpm)
+    return Pieces().add(t, lat, lon, w, building) if len(t) else Pieces()

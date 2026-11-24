@@ -1,9 +1,10 @@
 """Route × departure-time planning for one trip (spec §23, §24, §31): POST /api/plan.
 
-Candidates come from the median field at the planned departure (fastest, lowest-exposure, balanced); each is then
-evaluated at every departure in the window on the shared field samples, so all comparisons are paired.
-shortcut: candidates are not re-generated per departure, and arrival constraints are deterministic, not chance
-constraints (§24.2); upgrade with time-dependent label-setting once traffic data exists.
+Candidates come from the median field at the planned departure (fastest, lowest-exposure, balanced, penalty); each is
+then evaluated at every departure in the window on the shared samples, so all comparisons are paired. Options compete
+on the risk-aware dose (§31.2); an arrival deadline is a chance constraint, P(late) ≤ 10% (§31.3).
+shortcut: candidates are not re-generated per departure; upgrade with time-dependent label-setting once traffic data
+exists (§23.3).
 """
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -12,12 +13,15 @@ import httpx
 import numpy as np
 
 from .. import config
+from ..assistant import explain
+from ..exposure import attribution
 from ..exposure import dose as dosing
-from ..exposure.microenv import ACCESS_VENT, BUILDING, MAIN_ROADS, MODES, VENT, congestion
+from ..exposure.microenv import ACCESS_VENT, MAIN_ROADS, MODES, VENT, congestion
 from ..field import forecast
+from ..mobility.travel_time import LATE_RISK
 from ..representation import road_graph
 from ..uncertainty import ensemble
-from . import confidence
+from . import confidence, risk, voi
 
 HOUR = 3600
 STEP_S = 15 * 60  # departure grid
@@ -58,6 +62,11 @@ class Ctx:
         self.T = len(self.field["times"])
         self.lats, self.lons = np.array(self.field["lats"]), np.array(self.field["lons"])
         self.med = np.asarray(self.field["median"], float)[None]
+        self.cov = np.asarray(self.field["coverage"], float)[None, None]  # (1, 1, ny, nx): time-invariant
+
+    def coverage(self, lat, lon) -> float:
+        """Mean observation coverage at points (spec §19.7, §31.5 item 4)."""
+        return float(dosing.conc(self.cov, self.lats, self.lons, np.zeros(len(lat)), lat, lon)[0].mean())
 
     def h(self, ts):
         return (np.asarray(ts, float) - self.t0) / HOUR
@@ -87,10 +96,19 @@ class Leg:
     road_air: float          # minute-weighted roadside air along the way, µg/m³ (median field)
     pieces: dosing.Pieces
     path: list
+    access_min: float        # walking / waiting outdoors before boarding
+    access_w: float          # its dose weight (minutes × m³/min)
+    edge_mins: np.ndarray    # per edge: minutes, midpoint time (s), dose weight
+    edge_mid: np.ndarray
+    edge_w: np.ndarray
 
     @property
     def arr(self):
         return self.dep + self.minutes * 60
+
+    def arrivals(self, ens):
+        """(S,) arrival times on the shared samples: the typical duration scaled by today's travel-time spread."""
+        return self.dep + self.minutes * 60 * ens["tt"][self.mode]
 
 
 def leg(ctx: Ctx, mode: str, edges, dep: float, o_ll, d_ll) -> Leg:
@@ -101,15 +119,17 @@ def leg(ctx: Ctx, mode: str, edges, dep: float, o_ll, d_ll) -> Leg:
     mins = g.length[edges] / 1000 / kmh * 60
     mid = start + (np.cumsum(mins) - mins / 2) * 60
     inc = 1.0 if rail else g.inc[edges]
+    w = mins * m.vent / 1000 * m.f * inc
+    access_w = m.access_min * ACCESS_VENT / 1000
     p = dosing.Pieces()
     if m.access_min:
-        p.add(ctx.h(dep + m.access_min * 30), o_ll[0], o_ll[1], m.access_min * ACCESS_VENT / 1000, "walk")
-    p.add(ctx.h(mid), g.mid_lat[edges], g.mid_lon[edges], mins * m.vent / 1000 * m.f * inc, mode)
+        p.add(ctx.h(dep + m.access_min * 30), o_ll[0], o_ll[1], access_w, "walk")
+    p.add(ctx.h(mid), g.mid_lat[edges], g.mid_lon[edges], w, mode)
     air = ctx.air(mid, g.mid_lat[edges], g.mid_lon[edges]) * inc
     nodes = np.r_[g.u[edges[:1]], g.v[edges]]
     path = [list(o_ll)] + np.round(np.c_[g.lat[nodes], g.lon[nodes]], 5).tolist() + [list(d_ll)]
     return Leg(mode, edges, dep, float(m.access_min + mins.sum()), float(g.length[edges].sum() / 1000),
-               float((air * mins).sum() / max(mins.sum(), 1e-9)), p, path)
+               float((air * mins).sum() / max(mins.sum(), 1e-9)), p, path, m.access_min, access_w, mins, mid, w)
 
 
 def endpoints(ctx: Ctx, mode: str, o_ll, d_ll):
@@ -164,8 +184,8 @@ def candidates(ctx: Ctx, mode: str, o: int, d: int, dep: float) -> list[np.ndarr
 def window_dose(ctx: Ctx, t: Leg, start: float, end: float, o_ll, d_ll, ob: str, db: str):
     """(S,) dose over [start, end]: indoors at the origin until departure, the trip, indoors at the destination."""
     v = VENT["rest"]  # activity before and after a trip is unknown; sitting is the common case
-    p = (dosing.dwell(ctx.h(start), ctx.h(t.dep), o_ll[0], o_ll[1], BUILDING[ob], v, ob) + t.pieces
-         + dosing.dwell(ctx.h(t.arr), ctx.h(end), d_ll[0], d_ll[1], BUILDING[db], v, db))
+    p = (dosing.dwell(ctx.h(start), ctx.h(t.dep), o_ll[0], o_ll[1], ob, v) + t.pieces
+         + dosing.dwell(ctx.h(t.arr), ctx.h(end), d_ll[0], d_ll[1], db, v))
     return dosing.dose(ctx.ens, ctx.lats, ctx.lons, p)
 
 
@@ -186,31 +206,6 @@ def avoided_roads(ctx: Ctx, base: Leg, alt: Leg, k=2) -> list[str]:
         return out
     b, a = by_name(base), by_name(alt)
     return [n for n, L in sorted(b.items(), key=lambda x: -x[1]) if L > 500 and a.get(n, 0) < 0.3 * L][:k]
-
-
-MODE_LINE = {
-    "car_ac": "With the AC on recirculate, air inside the car is about half of roadside air.",
-    "walk": "Walking means breathing harder, so when and where you walk matters more than for other modes.",
-    "cycle": "Cycling means breathing hard, so when and where you ride matters more than for other modes.",
-    "two_wheeler": "A two-wheeler gives no protection: you breathe roadside air, often inside the traffic plume.",
-    "auto": "An auto gives no protection: you breathe roadside air, often inside the traffic plume.",
-    "bus": "A bus gives little protection, and the wait at the stop is outdoors.",
-    "metro": "Metro coaches keep air at about 40% of roadside levels; the walk to the station is outdoors.",
-}
-
-
-def caveats(ctx: Ctx, mode: str, snap_m: float) -> list[str]:
-    out = []
-    if not ctx.field["meta"]["n_reporting"]:
-        out.append("No monitoring stations feed this forecast yet: it is the regional CAMS forecast, so street-level "
-                   "differences come from fixed road-type factors, not measurements.")
-    out.append("Travel times use typical speeds by road type and rush hour, not live traffic.")
-    if mode == "metro":
-        out.append("Metro is approximated along the road network rather than the real lines.")
-    if snap_m > SNAP_WARN_M:
-        out.append(f"The start or destination is about {round(snap_m, -1):.0f} m from the nearest road Sora knows; "
-                   "that walk isn't counted.")
-    return out
 
 
 def plan(req) -> dict:
@@ -239,50 +234,70 @@ def plan(req) -> dict:
 
     la = req.latest_arrival.timestamp() if req.latest_arrival else None
     extra = [t.minutes - base.minutes for _, t in trips]
-    ok = [i for i, (_, t) in enumerate(trips) if extra[i] <= req.max_extra_min + 1e-6 and (la is None or t.arr <= la)]
+    # chance constraint (§31.3): an option must arrive by the deadline on at least 1 − LATE_RISK of the samples
+    late_ok = [la is None or float(np.mean(t.arrivals(ctx.ens) > la)) <= LATE_RISK for _, t in trips]
+    ok = [i for i in range(len(trips)) if extra[i] <= req.max_extra_min + 1e-6 and late_ok[i]]
     if not ok:
         fastest = round(min(t.minutes for _, t in trips))
-        raise PlanError(400, "no_feasible", f"No departure in your window arrives by {hhmm(la)}. "
+        raise PlanError(400, "no_feasible", f"No departure in your window arrives by {hhmm(la)} with 90% confidence. "
                                             f"The fastest option takes about {fastest} min.", fastest_min=fastest)
 
-    med = [float(np.median(x)) for x in doses]
-    b_med, half = float(np.median(d_base)), max(1.0, (late - early) / 2 / 60)
+    rk = [risk.risk(x) for x in doses]  # risk-aware dose (§31.2): what options compete on
+    b_rk, half = risk.risk(d_base), max(1.0, (late - early) / 2 / 60)
     # knee point with unknown weights (§31.1). The user's window and detour budget already say what is acceptable,
     # so the time terms only break near-ties: using the whole budget must save > 10%, moving across half the window > 5%
-    score = lambda i: med[i] / b_med + 0.1 * max(0, extra[i]) / max(1, req.max_extra_min) + 0.05 * abs(trips[i][1].dep - dep0) / 60 / half
-    A = min(ok, key=lambda i: med[i])
+    score = lambda i: rk[i] / b_rk + 0.1 * max(0, extra[i]) / max(1, req.max_extra_min) + 0.05 * abs(trips[i][1].dep - dep0) / 60 / half
+    A = min(ok, key=lambda i: rk[i])
     B = min(ok, key=score)
-    C = min(ok, key=lambda i: (round(trips[i][1].minutes), abs(trips[i][1].dep - dep0), med[i]))
+    C = min(ok, key=lambda i: (round(trips[i][1].minutes), abs(trips[i][1].dep - dep0), rk[i]))
+
+    ob, db, vent = req.origin_building, req.dest_building, VENT["rest"]
+    segs = lambda t: attribution.segments(ctx, t, early, end, o_ll, d_ll, ob, db, vent)
 
     def option(i, oid, label):
         t, x = (base, d_base) if i is None else (trips[i][1], doses[i])
         red, pb = confidence.reduction(x, d_base) if i is not None else ({"median": 0, "p05": 0, "p95": 0}, None)
         return {"id": oid, "label": label, "departure": iso(t.dep), "travel_min": round(t.minutes),
                 "distance_km": round(t.km, 1), "dose": confidence.band(x), "reduction_pct": red, "p_better": pb,
-                "extra_min": round(t.minutes - base.minutes), "path": t.path}
+                "extra_min": round(t.minutes - base.minutes), "path": t.path, "segments": segs(t)}
 
+    baseline = option(None, "plan", "Your plan")
     opts = [option(A, "A", "Lowest exposure"), option(B, "B", "Balanced"), option(C, "C", "Fastest")]
     rec = opts[1]
     is_reliable = confidence.reliable(rec["reduction_pct"], rec["p_better"])
     tb = trips[B][1]
-    lines = []
+    total = lambda o: sum(s["dose"] for s in o["segments"])
+    robust = None
     if is_reliable:
-        if tb.dep != base.dep and tb.road_air < base.road_air:
-            lines.append(f"Leaving at {hhmm(tb.dep)} instead of {hhmm(base.dep)}: air along the way is forecast at about "
-                         f"{tb.road_air:.0f} µg/m³ then, against {base.road_air:.0f} µg/m³.")
-        if tb.dep != base.dep and tb.minutes < base.minutes - 2:
-            lines.append(f"Leaving at {hhmm(tb.dep)} misses the rush: about {tb.minutes:.0f} min on the road instead of "
-                         f"{base.minutes:.0f}, so less time breathing traffic air.")
-        if not np.array_equal(tb.edges, base.edges):
-            names = avoided_roads(ctx, base, tb)
-            lines.append(f"This route keeps {main_share(ctx, tb):.0%} of the distance on main roads, against "
-                         f"{main_share(ctx, base):.0%} on the fastest route" + (f" (less of {' and '.join(names)})." if names else "."))
-    else:
-        lines.append("The options are not reliably different today: the differences are smaller than the forecast "
-                     "uncertainty. Take the one you prefer.")
-    lines.append(MODE_LINE[req.mode])
+        g = ctx.g
+        robust = voi.robustness(total(baseline), total(rec), rec["segments"],
+                                ctx.coverage(g.mid_lat[tb.edges], g.mid_lon[tb.edges]))
+    outdoor = [s for s in rec["segments"] if s["kind"] in ("road", "access")]
+    roads = [{**s, "share": s["dose"] / sum(x["dose"] for x in outdoor)} for s in outdoor if s["kind"] == "road"]
+    lines = explain.plan_lines(
+        reliable=is_reliable, mode=req.mode, dep=hhmm(tb.dep), base_dep=hhmm(base.dep), air=tb.road_air,
+        base_air=base.road_air, minutes=tb.minutes, base_minutes=base.minutes,
+        route_changed=not np.array_equal(tb.edges, base.edges), main_share=main_share(ctx, tb),
+        base_main_share=main_share(ctx, base), avoided=avoided_roads(ctx, base, tb),
+        top_road=roads[0] if roads and roads[0]["label"] not in (attribution.LOCAL, "other streets") else None,
+        robustness=robust, arrive_by=hhmm(float(np.quantile(tb.arrivals(ctx.ens), 1 - LATE_RISK))) if la else None)
     return {
-        "baseline": option(None, "plan", "Your plan"), "options": opts, "recommended": "B", "reliable": is_reliable,
-        "explanation": lines, "caveats": caveats(ctx, req.mode, snap_m),
+        "baseline": baseline, "options": opts, "recommended": "B", "reliable": is_reliable,
+        "explanation": lines,
+        "caveats": explain.caveats(stations_reporting=ctx.field["meta"]["n_reporting"], mode=req.mode, snap_m=snap_m,
+                                   snap_warn_m=SNAP_WARN_M),
         "degradation": ctx.field["meta"]["degradation"], "window": {"start": iso(early), "end": iso(end)},
+        "front": pareto_front(trips, doses, rk, ok, base), "robustness": robust,
     }
+
+
+def pareto_front(trips, doses, rk, ok, base) -> list[dict]:
+    """Feasible (departure, route) pairs no other pair beats on both travel time and risk-aware dose (§31.1)."""
+    front, best = [], np.inf
+    for i in sorted(ok, key=lambda i: (trips[i][1].minutes, rk[i])):
+        if rk[i] < best - 1e-9:
+            best = rk[i]
+            t = trips[i][1]
+            front.append({"departure": iso(t.dep), "travel_min": round(t.minutes), "extra_min": round(t.minutes - base.minutes),
+                          "dose": confidence.band(doses[i]), "risk": round(rk[i])})
+    return front

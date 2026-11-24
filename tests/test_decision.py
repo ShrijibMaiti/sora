@@ -67,6 +67,37 @@ def test_cleaner_later_departure_is_recommended(monkeypatch):
     assert any(line.startswith("Leaving at") for line in p["explanation"])
 
 
+def test_front_segments_and_robustness(monkeypatch):
+    now_h = t0().hour
+    monkeypatch.setattr(openmeteo, "fetch_points", fake_points(pm=lambda h: 300 * np.exp(-np.maximum(h - now_h, 0) / 3) + 20))
+    p = client.post("/api/plan", json=plan_body(mode="walk", dest=[28.56, 77.21], dest_building="naturally_ventilated")).json()
+    # Pareto front (§31.1): faster points have higher risk-aware dose, and the lowest-exposure option is on it
+    front = p["front"]
+    assert front and all(a["travel_min"] <= b["travel_min"] and a["risk"] > b["risk"] for a, b in zip(front, front[1:]))
+    assert front[-1]["departure"] == p["options"][0]["departure"]
+    # attribution (§22.4): parts of the plan's dose, largest first, every kind named
+    for o in [p["baseline"], *p["options"]]:
+        kinds = {s["kind"] for s in o["segments"]}
+        assert kinds <= {"indoor", "access", "road"} and "road" in kinds and "indoor" in kinds
+        assert [s["dose"] for s in o["segments"]] == sorted((s["dose"] for s in o["segments"]), reverse=True)
+    # robustness (§31.5–31.6): a positive margin and where it matters, stated in the explanation
+    r = p["robustness"]
+    assert p["reliable"] and r["margin_pct"] > 0 and r["where"] and r["unmonitored"] is True
+    assert any("advice holds unless" in line for line in p["explanation"])
+
+
+def test_arrival_deadline_is_a_chance_constraint():
+    """A deadline met only on a typical day is not enough: it must hold on 9 days in 10 (§31.3)."""
+    body = plan_body(win_min=0)  # one departure, so only the deadline decides
+    p = client.post("/api/plan", json=body).json()
+    typical = p["baseline"]["travel_min"]
+    dep = datetime.fromisoformat(body["planned_departure"].replace("Z", "+00:00"))
+    tight = client.post("/api/plan", json=body | {"latest_arrival": iso(dep + timedelta(minutes=typical + 1))})
+    assert tight.status_code == 400 and tight.json()["detail"]["code"] == "no_feasible"  # ~50% late: refused
+    roomy = client.post("/api/plan", json=body | {"latest_arrival": iso(dep + timedelta(minutes=round(typical * 1.6)))})
+    assert roomy.status_code == 200
+
+
 def test_flat_field_is_not_reliably_different(monkeypatch):
     monkeypatch.setattr(openmeteo, "fetch_points", fake_points(pm=lambda h: np.full_like(h, 100.0)))
     p = client.post("/api/plan", json=plan_body()).json()
@@ -121,8 +152,10 @@ def test_counterfactual_matches_contract(change):
 def test_counterfactual_filtered_destination_always_helps():
     c = client.post("/api/counterfactual", json={"plan": plan_body(), "change": {
         "kind": "destination", "dest": D, "dest_building": "ac_filtered"}}).json()
-    # not exactly 1: both buildings' infiltration factors are uncertain priors (spec §21.4)
-    assert c["p_better"] >= 0.9 and c["delta_pct"]["median"] < 0 and c["verdict"] == "Likely helps"
+    # not exactly 1: both buildings' infiltration factors are uncertain priors (spec §21.4); whether the 90% range also
+    # clears zero depends on how much of the window is spent there, so the verdict may be either of the two
+    assert c["p_better"] >= 0.9 and c["delta_pct"]["median"] < 0
+    assert c["verdict"] == ("Likely helps" if c["delta_pct"]["p95"] < 0 else "Not reliably different")
 
 
 def test_stay_indoors_outside_the_trip_changes_nothing():

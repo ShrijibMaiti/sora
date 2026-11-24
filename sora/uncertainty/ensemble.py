@@ -7,6 +7,7 @@ import numpy as np
 
 from .. import config
 from ..exposure.microenv import BUILDING, MODES
+from ..mobility.travel_time import SPREAD
 
 RHO_H = 0.95  # hour-to-hour correlation of the city-wide error
 SHARE_CITY = 0.7
@@ -34,7 +35,11 @@ def get(field: dict, n: int = config.N_SAMPLES, seed: int = 0) -> dict:
     z = np.sqrt(SHARE_CITY) * g[:, :, None, None] + np.sqrt(1 - SHARE_CITY) * rng.standard_normal((S, 1, ny, nx))
     param = {k: np.exp(PARAM_SIGMA["mode"] * rng.standard_normal(S)) for k in MODES}
     param |= {k: np.exp(PARAM_SIGMA["building"] * rng.standard_normal(S)) for k in BUILDING}
-    out = {"C": med[None] * np.exp(sigma[None] * z), "param": param}
+    # how long today's trips take relative to typical (traffic); a longer trip also means more air breathed on the way
+    tt = {k: np.exp(SPREAD[k] * rng.standard_normal(S)) for k in MODES}
+    for k in MODES:
+        param[k] = param[k] * tt[k]
+    out = {"C": med[None] * np.exp(sigma[None] * z), "param": param, "tt": tt}
     if len(_cache) > 8:
         _cache.clear()
     _cache[key] = out

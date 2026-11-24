@@ -18,9 +18,11 @@ and day plans that lower your dose, with an honest confidence for each suggestio
 | Forecast | Hourly 0–72 h fields for PM2.5, PM10, NO₂, O₃, SO₂ and CO from the CAMS global forecast (Open-Meteo) on a 12×12 grid, each with a fixed log-normal uncertainty band; rebuilt just after every hour. Labelled degradation **L5 "CAMS only"**: no station correction or street-scale downscaling yet (that is the ML work). Trip and day planning use PM2.5. |
 | Alerts | Stagnant air (low mixing height + calm wind), rain washout, smoke from upwind fires (forecast + FIRMS), and festival smoke from a calendar (Diwali, Bhogi; `events/calendar.py`, extend yearly). |
 | Stations, fires | OpenAQ station status and NASA FIRMS fires on the map when their keys are set. Shown, not assimilated. |
-| Trip planning | Routes on the OSM road network × departure times in your window, dose over a common window (indoors before and after included), 128 shared field samples for every range and "chance it's lower" (spec §23, §24, §31). |
-| Day planning | Whole-day schedule (07:00–23:00): alternative places and departure shifts within your extra-travel budget (spec §25). |
-| What if | Leave later, change mode, change destination / building, stay in during the peak (spec §26). |
+| Trip planning | Routes on the OSM road network × departure times in your window, dose over a common window (indoors before and after included), 128 shared field samples for every range and "chance it's lower" (spec §23, §24, §31). Options compete on a risk-aware dose (mean + CVaR, §31.2); arrival deadlines must hold on 9 days in 10 given each mode's travel-time spread (§31.3); the full Pareto front, a robustness margin (§31.5–31.6) and a breakdown of where the dose comes from (§22.4) come with every plan. |
+| Exposure model | Indoor air follows the dynamic mass-balance model (§21.3): it lags outdoor air by 25–70 min depending on the building, so short peaks are blunted indoors. Breathing rates by activity (§22.2). |
+| Explanations | Template sentences built only from computed numbers (`assistant/explain.py`): why the recommendation wins, which road matters most, how robust the advice is, arrival confidence. |
+| Day planning | Whole-day schedule (07:00–23:00): alternative places and departure shifts within your extra-travel budget, scored on the same risk-aware dose (spec §25). |
+| What if | Leave later, change mode, change destination / building, stay in during the peak, with the building's lag in the reasoning (spec §26). |
 | Places | Featured places and an example trip and day per city; search over ~2,500 OSM neighbourhoods, stations, destinations and roads, served by Sora's own API. |
 | Web app | Landing page, map app (Live, Trip, Day, What if, Insights), `/styleguide`. Insights shows the days you planned, kept on your device only. |
 | Ops | One process serves API + app, gzip, `/api/health`, Docker image, CI, browser smoke test. |
@@ -28,8 +30,9 @@ and day plans that lower your dose, with an honest confidence for each suggestio
 Placeholders (empty files in the tree below): the T0 field model (station ML + LUR), physics, neural operator, GNNs,
 generative uncertainty, simulators, mobility inference, personal twin, baselines and evaluation.
 
-Shortcuts the answers state in their caveats: fixed microenvironment, near-road and speed priors instead of fitted
-values and live traffic; metro approximated along roads; field uncertainty from a fixed prior, not an ensemble.
+Shortcuts the answers state in their caveats: fixed microenvironment, near-road, indoor and speed priors instead of
+fitted values and live traffic; one travel-time spread per mode; metro approximated along roads; field uncertainty
+from a fixed prior, not an ensemble; robustness as one uniform perturbation, not per-region sensitivities.
 
 ## Run
 
@@ -140,21 +143,30 @@ sora/
 │   │   ├── calendar.py               ● festival smoke alerts (Diwali, Bhogi dates table)
 │   │   └── attribution.py
 │   │
-│   ├── mobility/                     L7 trajectory.py · map_matching.py · stay_points.py · …   §20
+│   ├── mobility/                     L7                                                        §20
+│   │   ├── travel_time.py            ● travel-time spread by mode, late-arrival risk
+│   │   └── trajectory.py · map_matching.py · stay_points.py · mode_inference.py
 │   │
 │   ├── exposure/                     L8                                                        §21–22
 │   │   ├── microenv.py               ● modes, buildings, breathing rates, near-road priors
 │   │   ├── dose.py                   ● inhaled dose on samples, indoor dwell
-│   │   └── indoor.py · ventilation.py · attribution.py
+│   │   ├── indoor.py                 ● dynamic mass-balance indoor model (lag, F_inf)
+│   │   ├── attribution.py            ● dose by indoor time, walking, named road
+│   │   └── ventilation.py
 │   │
 │   ├── decision/                     L9                                                        §23–26, §31
 │   │   ├── routing.py                ● route × departure planning (/api/plan)
 │   │   ├── schedule.py               ● whole-day optimization (/api/day)
 │   │   ├── counterfactual.py         ● what-if engine (/api/counterfactual)
 │   │   ├── confidence.py             ● paired P(improvement), bands, "not reliably different"
-│   │   └── departure.py · pareto.py · risk.py · voi.py
+│   │   ├── risk.py                   ● risk-aware dose (mean + CVaR)
+│   │   ├── voi.py                    ● robustness margin of a recommendation
+│   │   └── departure.py · pareto.py  (front lives in routing.py)
 │   │
-│   ├── assistant/ · personal/        L10 explanations / proactive, L11 personal twin          §27–29
+│   ├── assistant/                    L10                                                       §28–29
+│   │   ├── explain.py                ● template explanations and caveats
+│   │   └── proactive.py · nl_interface.py
+│   ├── personal/                     L11 personal twin                                         §27
 │   ├── baselines/ · eval/            B0–B3, metrics, splits, ablations                         §34–37
 │   │
 │   └── api/                          FastAPI                                                   §41.2

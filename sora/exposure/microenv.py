@@ -5,8 +5,10 @@ to Indian measurements and live traffic; replace with the dynamic indoor model (
 """
 from dataclasses import dataclass
 
-# steady-state infiltration factor F_inf by building (spec §21.4)
-BUILDING = {"naturally_ventilated": 0.8, "ac_sealed": 0.45, "ac_filtered": 0.25}
+from . import indoor
+
+# steady-state infiltration factor F_inf by building (spec §21.4), from the dynamic model's parameters
+BUILDING = {b: indoor.f_inf(b) for b in indoor.PARAMS}
 BUILDING_LABEL = {"naturally_ventilated": "Naturally ventilated", "ac_sealed": "AC, sealed", "ac_filtered": "AC with filter"}
 
 # breathing rate, L/min (spec §22.2, after US EPA Exposure Factors Handbook ch. 6)

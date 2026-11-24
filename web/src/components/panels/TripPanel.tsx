@@ -1,7 +1,7 @@
 import { useEffect, type FormEvent } from 'react';
 import { BUILDINGS, MODES, ROUTE, pareto, recOf, departed, routeColor, sgn, segs, toMin, hhmm, type BuildingKey, type PlanOk, type TripOption } from '../../data/sora';
 import { placeOf, useSora } from '../../state/store';
-import { istDayStart, istMinutes } from '../../lib/time';
+import { istDayStart, istHHMM, istMinutes } from '../../lib/time';
 import { Select } from '../Chrome';
 import { Icon } from '../Icon';
 import { Disclaimer, Dl, Meter, PanelHeader, SubTabs } from './shared';
@@ -210,6 +210,32 @@ function OptionRow({ o, res }: { o: TripOption; res: PlanOk }) {
   );
 }
 
+/** Where an option's dose comes from over the planning window (spec §22.4), largest part first. */
+function DoseParts({ o, mode, window }: { o: TripOption; mode: string; window: string }) {
+  const parts = o.segments ?? [], total = parts.reduce((a, s) => a + s.dose, 0) || 1;
+  const travel = mode === 'metro' ? 'var(--me-metro)' : ['walk', 'cycle', 'two_wheeler'].includes(mode) ? 'var(--me-road)' : 'var(--me-vehicle)';
+  const color = (k: string) => (k === 'indoor' ? 'var(--me-home)' : k === 'access' ? 'var(--me-road)' : travel);
+  return (
+    <section aria-label="Where the dose comes from" className="stack g12" style={{ marginTop: 8 }}>
+      <span className="eyebrow">Where the dose comes from, {window} IST</span>
+      {parts.map((s) => {
+        const pct = s.dose / total;
+        return (
+          <div key={s.label} className="stack g6">
+            <div style={{ display: 'flex', gap: 8, fontSize: 'var(--fs-small)' }}>
+              <span style={{ flex: 1 }}>{s.label[0].toUpperCase() + s.label.slice(1)}</span>
+              <span className="mono" style={{ color: 'var(--text-secondary)' }}>{s.minutes} min · {Math.round(pct * 100)}%</span>
+            </div>
+            <div aria-hidden="true" style={{ height: 6, borderRadius: 3, background: 'var(--surface-raised)' }}>
+              <span style={{ display: 'block', width: `${(pct * 100).toFixed(1)}%`, height: '100%', borderRadius: 3, background: color(s.kind) }} />
+            </div>
+          </div>
+        );
+      })}
+    </section>
+  );
+}
+
 function TripResult({ res }: { res: PlanOk }) {
   const { st, set, selectOpt, remind } = useSora();
   const all = [res.baseline, ...res.options];
@@ -259,6 +285,7 @@ function TripResult({ res }: { res: PlanOk }) {
           <div className="stack g12" style={{ fontSize: 'var(--fs-h4)', lineHeight: 1.55 }}>
             {(isP ? [`This is the trip as you planned it: leave at ${so.departure} on your usual route.`] : res.explanation).map((t) => <p key={t} style={{ margin: 0, textWrap: 'pretty' }}>{t}</p>)}
           </div>
+          {!!so.segments?.length && <DoseParts o={so} mode={st.trip.mode} window={`${res.window.start}–${res.window.end}`} />}
           <div style={{ marginTop: 8 }}>
             <Dl rows={[
               ['Benefit', isP ? `Baseline · ${so.dose.median} µg (${so.dose.p05}–${so.dose.p95})` : `${sgn(-so.reduction_pct.median)}% (${sgn(-so.reduction_pct.p05)} to ${sgn(-so.reduction_pct.p95)})`, { fontFamily: 'var(--font-mono)' }],
@@ -275,13 +302,18 @@ function TripResult({ res }: { res: PlanOk }) {
         <section aria-label="Trade-off chart" className="sec">
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
             <span className="eyebrow">Exposure against travel time</span>
-            <span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>bars = 90% range</span>
+            <span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>bars = 90% range{PR.front.length ? ' · dots = best trade-offs' : ''}</span>
           </div>
           <svg viewBox="0 0 360 190" role="img" style={{ width: '100%', height: 'auto' }}
             aria-label={all.map((o) => `${o.label}: dose ${o.dose.median} µg, range ${o.dose.p05}–${o.dose.p95}, ${o.travel_min} min` + (o.p_better != null ? `, ${Math.round(o.p_better * 100)}% chance lower` : '')).join('; ')}>
             <line x1="28" y1="162" x2="350" y2="162" stroke="var(--border-default)" />
             <line x1="28" y1="10" x2="28" y2="162" stroke="var(--border-default)" />
             <polyline points={PR.frontier} fill="none" stroke="var(--text-tertiary)" strokeDasharray="3 4" />
+            {PR.front.map(({ x, y, f }) => (
+              <circle key={f.departure + f.travel_min} cx={x} cy={y} r={3} fill="var(--text-tertiary)">
+                <title>{`Leave ${istHHMM(f.departure)} · ${f.travel_min} min · ${f.dose.median} µg (${f.dose.p05}–${f.dose.p95})`}</title>
+              </circle>
+            ))}
             {PR.pts.map((p) => {
               const on = p.id === st.sel;
               return (

@@ -195,13 +195,18 @@ export type PlanQuery = {
   max_extra_min?: number; origin_building?: BuildingKey; force_unreliable?: boolean;
 };
 /** View model of an option: departure as IST "HH:MM" plus minutes-of-day; departure_iso is set when it came from the API. */
+/** Where an option's dose comes from (spec §22.4): indoor time, walking/waiting, named roads. */
+export type DoseSegment = { label: string; kind: 'indoor' | 'access' | 'road'; minutes: number; dose: number };
+/** A departure × route on the Pareto front of travel time against risk-aware dose (spec §31.1). */
+export type FrontPoint = { departure: string; travel_min: number; extra_min: number; dose: Band; risk: number };
 export type TripOption = {
   id: RouteId; label: string; departure: string; departure_min: number; departure_iso?: string; travel_min: number; distance_km: number;
-  dose: Band; reduction_pct: Band; p_better: number | null; extra_min: number; path: LatLng[];
+  dose: Band; reduction_pct: Band; p_better: number | null; extra_min: number; path: LatLng[]; segments?: DoseSegment[];
 };
 export type PlanOk = {
   error?: undefined; baseline: TripOption; options: TripOption[]; recommended: RouteId; reliable: boolean; explanation: string[]; caveats: string[];
   degradation: string; window: { start: string; end: string };
+  front?: FrontPoint[]; robustness?: { margin_pct: number; where: string; unmonitored: boolean } | null;
 };
 /** error = API error code (docs/api_contract.md) or 'missing' when the form lacks a start/destination. */
 export const PLAN_ERRORS = ['missing', 'invalid', 'outside', 'no_route', 'no_feasible', 'beyond_horizon', 'not_built'] as const;
@@ -343,13 +348,23 @@ export function recOf(res: PlanOk, now = Date.now()): RouteId | null {
 }
 
 export const pareto = (res: PlanOk, W: number, H: number, pad = 28) => {
-  const all = [res.baseline, ...res.options];
-  const xs = all.map((o) => o.travel_min), ys = all.flatMap((o) => [o.dose.p05, o.dose.p95]);
+  const all = [res.baseline, ...res.options], fr = res.front ?? [];
+  const xs = [...all.map((o) => o.travel_min), ...fr.map((f) => f.travel_min)];
+  const ys = [...all.flatMap((o) => [o.dose.p05, o.dose.p95]), ...fr.map((f) => f.dose.median)];
   const x0 = Math.min(...xs) - 4, x1 = Math.max(...xs) + 4, y0 = 0, y1 = Math.max(...ys) * 1.1;
   const X = (v: number) => pad + ((v - x0) / (x1 - x0)) * (W - pad - 10), Y = (v: number) => H - pad - ((v - y0) / (y1 - y0)) * (H - pad - 10);
   const pts = all.map((o) => ({ id: o.id, letter: o.id === 'plan' ? 'You' : o.id, x: X(o.travel_min), y: Y(o.dose.median), y05: Y(o.dose.p05), y95: Y(o.dose.p95), c: routeColor(o.id, recOf(res)), hollow: o.id === 'plan' }));
-  const frontier = res.options.slice().sort((a, b) => a.travel_min - b.travel_min).map((o) => X(o.travel_min).toFixed(1) + ',' + Y(o.dose.median).toFixed(1)).join(' ');
-  return { pts, frontier, xLabel: 'Travel time (min)' };
+  /* options at the same point (same departure and route) share one label, "A·B·C", instead of overprinting */
+  const at = (p: { x: number; y: number }) => p.x.toFixed(0) + ',' + p.y.toFixed(0);
+  pts.forEach((p, i) => {
+    const same = pts.filter((q) => at(q) === at(p));
+    p.letter = same[0] === pts[i] ? same.map((q) => q.letter).join('·') : '';
+  });
+  /* the server's full front (every departure × route that nothing beats on both axes) when present, else A/B/C */
+  const line = fr.length ? fr.map((f) => [f.travel_min, f.dose.median]) : res.options.slice().sort((a, b) => a.travel_min - b.travel_min).map((o) => [o.travel_min, o.dose.median]);
+  const frontier = line.map(([x, y]) => X(x).toFixed(1) + ',' + Y(y).toFixed(1)).join(' ');
+  const front = fr.map((f) => ({ x: X(f.travel_min), y: Y(f.dose.median), f }));
+  return { pts, frontier, front, xLabel: 'Travel time (min)' };
 };
 
 export const DEGRADE = [
