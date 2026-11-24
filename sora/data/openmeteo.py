@@ -11,6 +11,7 @@ AQ_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 MET_URL = "https://api.open-meteo.com/v1/forecast"
 MET_VARS = ["wind_speed_10m", "wind_direction_10m", "boundary_layer_height",
             "temperature_2m", "relative_humidity_2m", "precipitation"]
+AQ_VARS = ["pm2_5", "pm10", "nitrogen_dioxide", "ozone", "sulphur_dioxide", "carbon_monoxide"]  # all µg/m³
 CHUNK = 50
 
 
@@ -31,11 +32,11 @@ def _fetch(url, lats, lons, variables, past_days, forecast_days):
 
 
 def fetch_points(lats, lons, past_days, forecast_days):
-    """Hourly UTC times and {variable: array (T, n_points)} for pm2_5 and MET_VARS."""
-    aq = _fetch(AQ_URL, lats, lons, ["pm2_5"], past_days, forecast_days)
+    """Hourly UTC times and {variable: array (T, n_points)} for AQ_VARS and MET_VARS."""
+    aq = _fetch(AQ_URL, lats, lons, AQ_VARS, past_days, forecast_days)
     met = _fetch(MET_URL, lats, lons, MET_VARS, past_days, forecast_days)
     times = pd.to_datetime(aq[0]["hourly"]["time"], utc=True)
-    data = {"pm2_5": np.array([p["hourly"]["pm2_5"] for p in aq], float).T}
+    data = {v: np.array([p["hourly"][v] for p in aq], float).T for v in AQ_VARS if v in aq[0]["hourly"]}
     met_times = pd.to_datetime(met[0]["hourly"]["time"], utc=True)
     for v in MET_VARS:
         arr = np.array([p["hourly"][v] for p in met], float).T

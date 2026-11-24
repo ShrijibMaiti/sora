@@ -16,12 +16,19 @@ from sora.field import forecast
 client = TestClient(app)
 
 
-def test_cities_lists_all_with_delhi_live():
+def test_cities_lists_all_four_live():
     r = client.get("/api/cities").json()
-    assert [c["key"] for c in r] == list(config.CITIES)
-    delhi = r[0]
-    assert delhi["built"] and delhi["status"] == "Live" and delhi["route_bbox"] == [28.515, 77.18, 28.645, 77.25]
-    assert all(c["status"] == "Preview" for c in r[1:])
+    assert [c["key"] for c in r] == ["delhi", "kolkata", "mumbai", "chennai"]
+    assert r[0]["route_bbox"] == [28.515, 77.18, 28.645, 77.25]
+    assert all(c["built"] and c["status"] == "Live" for c in r)
+
+
+def test_preview_city_is_not_built(preview_city):
+    assert next(c for c in client.get("/api/cities").json() if c["key"] == preview_city)["status"] == "Preview"
+    for url in (f"/api/field?city={preview_city}", f"/api/places?city={preview_city}", f"/api/search?city={preview_city}&q=park"):
+        r = client.get(url)
+        assert r.status_code == 404 and r.json()["detail"]["code"] == "not_built", url
+    assert client.get(f"/api/events?city={preview_city}").json() == []
 
 
 def test_field_matches_contract():
@@ -37,6 +44,21 @@ def test_field_matches_contract():
     assert (p95[-1] / med[-1]).mean() > (p95[0] / med[0]).mean()
 
 
+def test_other_pollutants_units_and_unavailable(monkeypatch):
+    gases = {"pm10": 150.0, "nitrogen_dioxide": 60.0, "carbon_monoxide": 1200.0, "ozone": float("nan")}
+    monkeypatch.setattr(openmeteo, "fetch_points", fake_points(gases=gases))
+    co = client.get("/api/field?city=delhi&pollutant=co").json()
+    assert co["pollutant"] == "co" and co["unit"] == "mg/m³" and co["median"][0][0][0] == pytest.approx(1.2)  # µg → mg
+    no2 = client.get("/api/field?city=delhi&pollutant=no2").json()
+    assert no2["unit"] == "µg/m³" and no2["median"][0][0][0] == 60.0
+    assert np.array(no2["p95"]).mean() / 60 > np.array(client.get("/api/field?city=delhi&pollutant=pm10").json()["p95"]).mean() / 150
+    for p in ("o3", "so2"):  # no data (NaN) and not fetched: unavailable, never invented
+        r = client.get(f"/api/field?city=delhi&pollutant={p}")
+        assert r.status_code == 404 and r.json()["detail"]["code"] == "unavailable"
+    # every pollutant shares the PM2.5 field's times and grid
+    assert co["times"] == no2["times"] == client.get("/api/field?city=delhi").json()["times"]
+
+
 def test_wind_direction_is_where_it_blows_to(monkeypatch):
     monkeypatch.setattr(openmeteo, "fetch_points", fake_points(wind_from=270.0))  # westerly
     assert client.get("/api/field?city=delhi").json()["wind"]["dir_deg"][0] == pytest.approx(90.0)
@@ -44,7 +66,6 @@ def test_wind_direction_is_where_it_blows_to(monkeypatch):
 
 @pytest.mark.parametrize("url,status,code", [
     ("/api/field?city=delhi&pollutant=no2", 404, "unavailable"),
-    ("/api/field?city=kolkata&pollutant=pm25", 404, "not_built"),
     ("/api/field?city=paris&pollutant=pm25", 404, "unknown_city"),
     ("/api/field?city=delhi&pollutant=xyz", 400, "invalid"),
     ("/api/field", 400, "invalid"),
@@ -69,10 +90,6 @@ def test_upstream_failure_serves_stale_then_503(monkeypatch):
     forecast._cache.clear()
     r = client.get("/api/field?city=delhi")
     assert r.status_code == 503 and r.json()["detail"]["code"] == "upstream"
-
-
-def test_events_preview_city_is_empty():
-    assert client.get("/api/events?city=mumbai").json() == []
 
 
 def test_stagnant_nights_merge_into_one_event():

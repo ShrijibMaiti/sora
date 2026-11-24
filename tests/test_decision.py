@@ -77,12 +77,17 @@ def test_flat_field_is_not_reliably_different(monkeypatch):
     (dict(origin=[28.70, 77.20]), 400, "outside"),
     (dict(mode="rocket"), 400, "invalid"),
     (dict(planned_departure=iso(t0() + timedelta(hours=9))), 400, "invalid"),
-    (dict(city="kolkata"), 404, "not_built"),
     (dict(city="paris"), 404, "unknown_city"),
 ])
 def test_plan_errors(change, status, code):
     r = client.post("/api/plan", json=plan_body() | change)
     assert r.status_code == status and r.json()["detail"]["code"] == code
+
+
+def test_planner_refuses_preview_city(preview_city):
+    r = client.post("/api/plan", json=plan_body(city=preview_city))
+    assert r.status_code == 404 and r.json()["detail"]["code"] == "not_built"
+    assert client.post("/api/day", json=day_body()[0] | {"city": preview_city}).json()["detail"]["code"] == "not_built"
 
 
 def test_plan_beyond_horizon():

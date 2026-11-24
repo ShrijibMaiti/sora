@@ -18,7 +18,15 @@ from ..data import fires, openaq, openmeteo
 HORIZON_H = config.FORECAST_DAYS * 24
 STALE_OK = timedelta(hours=3)  # an older field still beats no field (spec §39)
 RETRY = timedelta(minutes=5)   # after a failed build, serve the old field instead of retrying on every request
-SIGMA0, SIGMA_PER_H = 0.35, 0.003  # log-space spread of CAMS error; widens with lead time
+SIGMA_PER_H = 0.003  # log-space spread of CAMS error widens with lead time
+# contract key: (Open-Meteo CAMS variable, unit, scale from µg/m³, log-sd of CAMS error at lead 0).
+# shortcut: fixed priors, wider for gases CAMS resolves poorly at city scale (NO₂, SO₂ are near-source); a model
+# ensemble or station-based calibration replaces them (spec §19).
+POLLUTANTS = {
+    "pm25": ("pm2_5", "µg/m³", 1, 0.35), "pm10": ("pm10", "µg/m³", 1, 0.40),
+    "no2": ("nitrogen_dioxide", "µg/m³", 1, 0.50), "o3": ("ozone", "µg/m³", 1, 0.35),
+    "so2": ("sulphur_dioxide", "µg/m³", 1, 0.60), "co": ("carbon_monoxide", "mg/m³", 1e-3, 0.45),
+}
 UPSTREAM_ERRORS = (httpx.HTTPError, ValueError, KeyError)
 
 log = logging.getLogger("sora.field")
@@ -65,39 +73,46 @@ def build(key: str, now: datetime) -> dict:
         raise ValueError(f"forecast does not cover {iso(t0)} + {HORIZON_H} h")
     sl = slice(i0, i0 + T)
 
-    pm = _ffill(data["pm2_5"][sl].copy())
-    if np.isnan(pm).any() or (pm < 0).any():
-        raise ValueError("CAMS PM2.5 has missing or negative values")
-    median = pm.reshape(T, config.GRID_N, config.GRID_N)
-    sigma = (SIGMA0 + SIGMA_PER_H * np.arange(T))[:, None, None]
+    grids = {}
+    for key_p, (var, unit, scale, s0) in POLLUTANTS.items():
+        a = _ffill(data[var][sl].copy()) if var in data else None
+        if a is None or np.isnan(a).any() or (a < 0).any():
+            if key_p == "pm25":
+                raise ValueError("CAMS PM2.5 has missing or negative values")
+            log.warning("%s: no usable CAMS %s; served as unavailable", key, var)
+            continue
+        grids[key_p] = (a.reshape(T, config.GRID_N, config.GRID_N) * scale, unit, (s0 + SIGMA_PER_H * np.arange(T))[:, None, None])
 
     # Open-Meteo gives the direction wind blows FROM; the contract wants where it blows TO
     spd, frm = data["wind_speed_10m"][sl], np.radians(data["wind_direction_10m"][sl])
     u, v = np.nanmean(-spd * np.sin(frm), 1), np.nanmean(-spd * np.cos(frm), 1)
     to_deg = np.degrees(np.arctan2(u, v)) % 360
 
-    r1 = lambda a: np.round(a, 1).tolist()
+    r = lambda a, d=1: np.round(a, d).tolist()
     tt = [iso(t) for t in times[sl]]
     # shown on the map, not assimilated: the field stays CAMS-only (coverage 0, degradation L5) until the T0 model
     stations = _optional("OpenAQ stations", openaq.stations, city.bbox, now) or []
     fire_pts = _optional("FIRMS fires", fires.fetch, fires.region(city.bbox)) or []
-    field = {
-        "city": key, "pollutant": "pm25", "unit": "µg/m³",
-        "times": tt, "lats": np.round(lats, 4).tolist(), "lons": np.round(lons, 4).tolist(),
-        "median": r1(median), "p05": r1(median * np.exp(-1.645 * sigma)), "p95": r1(median * np.exp(1.645 * sigma)),
+    shared = {
+        "city": key, "times": tt, "lats": np.round(lats, 4).tolist(), "lons": np.round(lons, 4).tolist(),
         "coverage": np.zeros((config.GRID_N, config.GRID_N)).tolist(),
         "stations": stations, "fires": fire_pts,
-        "wind": {"dir_deg": r1(to_deg), "speed_ms": np.round(np.nanmean(spd, 1), 2).tolist()},
+        "wind": {"dir_deg": r(to_deg), "speed_ms": np.round(np.nanmean(spd, 1), 2).tolist()},
         "meta": {
             "analysis_time": tt[0], "next_update": iso(t0 + timedelta(hours=1)), "built_at": iso(now),
             "degradation": "L5", "n_stations": len(stations), "n_reporting": sum(s["reporting"] for s in stations),
             "background": "CAMS global forecast",
         },
     }
+    fields = {}
+    for p, (median, unit, sigma) in grids.items():
+        d = 3 if unit == "mg/m³" else 1  # CO is ~0.5–3 mg/m³
+        fields[p] = {**shared, "pollutant": p, "unit": unit, "median": r(median, d),
+                     "p05": r(median * np.exp(-1.645 * sigma), d), "p95": r(median * np.exp(1.645 * sigma), d)}
     met = {k: np.nanmean(data[k][sl], 1) for k in ("boundary_layer_height", "wind_speed_10m", "precipitation")}
     met["wind_from_deg"] = (to_deg + 180) % 360
     met["times"] = tt
-    return {"field": field, "met": met}
+    return {"field": fields["pm25"], "fields": fields, "met": met}
 
 
 def get(key: str, now: datetime | None = None) -> dict:

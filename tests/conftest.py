@@ -1,4 +1,5 @@
 """Shared fixtures: synthetic Open-Meteo data and a synthetic Delhi street grid, so no test touches the network."""
+import dataclasses
 import json
 
 import networkx as nx
@@ -15,8 +16,9 @@ from sora.uncertainty import ensemble
 N = config.GRID_N ** 2
 
 
-def fake_points(blh=None, rain=None, wind_from=270.0, pm=None):
-    """Open-Meteo stand-in. `pm(hours_since_day0) -> (T,)` overrides the default diurnal PM2.5 cycle."""
+def fake_points(blh=None, rain=None, wind_from=270.0, pm=None, gases=None):
+    """Open-Meteo stand-in. `pm(hours_since_day0) -> (T,)` overrides the default diurnal PM2.5 cycle;
+    `gases` adds other CAMS variables as constants, e.g. {"carbon_monoxide": 1200.0} (NaN = no data)."""
     def fetch(lats, lons, past_days, forecast_days):
         day0 = pd.Timestamp.now(tz="UTC").floor("D")
         times = pd.date_range(day0, periods=24 * forecast_days, freq="h")
@@ -27,6 +29,7 @@ def fake_points(blh=None, rain=None, wind_from=270.0, pm=None):
         p[-1, 0] = np.nan  # CAMS tail gap
         col = lambda v: np.repeat(np.asarray(v, float).reshape(-1, 1) if np.ndim(v) else np.full((T, 1), v), N, 1)
         return times, {
+            **{v: col(x) for v, x in (gases or {}).items()},
             "pm2_5": p, "wind_speed_10m": col(2.0), "wind_direction_10m": col(wind_from),
             "boundary_layer_height": col(blh if blh is not None else 800.0),
             "precipitation": col(rain if rain is not None else 0.0),
@@ -67,6 +70,13 @@ OSM_PLACES = {"elements": [
     {"type": "node", "id": 4, "lat": 28.70, "lon": 77.20, "tags": {"amenity": "cafe", "name": "Outside Café"}},  # beyond route_bbox
     {"type": "node", "id": 5, "lat": 28.57, "lon": 77.21, "tags": {"amenity": "cafe"}},  # no name
 ]}
+
+
+@pytest.fixture
+def preview_city(monkeypatch):
+    """A city whose model isn't live (every configured city is live today; new ones start this way)."""
+    monkeypatch.setitem(config.CITIES, "kolkata", dataclasses.replace(config.CITIES["kolkata"], built=False))
+    return "kolkata"
 
 
 @pytest.fixture(autouse=True)

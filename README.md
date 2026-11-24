@@ -11,12 +11,12 @@ and day plans that lower your dose, with an honest confidence for each suggestio
 
 ## Status
 
-**Live for Delhi** (Kolkata, Mumbai and Chennai are listed as Preview). Everything outside the ML layers is built:
+**Live for Delhi, Kolkata, Mumbai and Chennai.** Everything outside the ML layers is built:
 
 | Area | What works |
 |---|---|
-| Forecast | Hourly 0–72 h PM2.5 field from the CAMS global forecast (Open-Meteo) on a 12×12 grid, with a fixed log-normal uncertainty band; rebuilt just after every hour. Labelled degradation **L5 "CAMS only"**: no station correction or street-scale downscaling yet (that is the ML work). |
-| Alerts | Stagnant air (low mixing height + calm wind), rain washout, and smoke from upwind fires, from the weather forecast and FIRMS detections. |
+| Forecast | Hourly 0–72 h fields for PM2.5, PM10, NO₂, O₃, SO₂ and CO from the CAMS global forecast (Open-Meteo) on a 12×12 grid, each with a fixed log-normal uncertainty band; rebuilt just after every hour. Labelled degradation **L5 "CAMS only"**: no station correction or street-scale downscaling yet (that is the ML work). Trip and day planning use PM2.5. |
+| Alerts | Stagnant air (low mixing height + calm wind), rain washout, smoke from upwind fires (forecast + FIRMS), and festival smoke from a calendar (Diwali, Bhogi; `events/calendar.py`, extend yearly). |
 | Stations, fires | OpenAQ station status and NASA FIRMS fires on the map when their keys are set. Shown, not assimilated. |
 | Trip planning | Routes on the OSM road network × departure times in your window, dose over a common window (indoors before and after included), 128 shared field samples for every range and "chance it's lower" (spec §23, §24, §31). |
 | Day planning | Whole-day schedule (07:00–23:00): alternative places and departure shifts within your extra-travel budget (spec §25). |
@@ -84,8 +84,10 @@ All under `/api`, JSON; full shapes and error codes in [`docs/api_contract.md`](
 | `POST /counterfactual` | "What if" on a trip |
 | `GET /health` | Uptime check |
 
-Adding a city: set `built=True` in `sora/config.py` `CITIES` and add its entries to `PLACES` and `EXAMPLES`
-(a test checks every featured place is routable and every example uses featured places).
+Adding a city: add it to `sora/config.py` `CITIES` (with `built=False` it shows as Preview), then its `PLACES` and
+`EXAMPLES` (take coordinates from the OSM extract the server caches in `data_cache/places_{city}.json`), then set
+`built=True`. Tests check every featured place is routable, every example uses featured places, and no place key
+repeats across cities.
 
 ## File tree
 
@@ -123,7 +125,7 @@ sora/
 │   │   └── grid.py · mapping.py · static_features.py · wind_edges.py
 │   │
 │   ├── field/                        T0 field model                                            §43
-│   │   ├── forecast.py               ● 0–72 h field (CAMS, L5), cache, stale fallback, backoff  §18
+│   │   ├── forecast.py               ● 0–72 h fields, six pollutants (CAMS, L5), cache, backoff  §18
 │   │   └── correction.py · downscale_lur.py · aqi.py        station ML, LUR, NAQI             T0
 │   │
 │   ├── physics/ · operator/ · gnn/   L4 physics layer, neural operator, street GNN             §14–17  T1/T2
@@ -135,7 +137,8 @@ sora/
 │   │
 │   ├── events/                       abnormal episodes                                         §30
 │   │   ├── detect.py                 ● stagnation, rain, upwind-smoke alerts from forecasts
-│   │   └── attribution.py · calendar.py
+│   │   ├── calendar.py               ● festival smoke alerts (Diwali, Bhogi dates table)
+│   │   └── attribution.py
 │   │
 │   ├── mobility/                     L7 trajectory.py · map_matching.py · stay_points.py · …   §20
 │   │

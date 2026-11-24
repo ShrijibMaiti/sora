@@ -15,7 +15,7 @@ const FAQ: [string, string][] = [
   ['Why does Sora sometimes say options are the same?', "When the difference between two plans is smaller than the uncertainty, Sora can't honestly say one is better. It tells you that instead of picking a winner at random."],
   ['What data does it use?', 'CPCB monitoring stations, CAMS forecasts from Copernicus, ERA5 weather, satellite fire detections, and OpenStreetMap roads and buildings.'],
   ['Does it track me?', "Not unless you turn it on. Location stays on your device by default, no raw GPS history goes to the cloud, and you can delete your history in one tap. Designed to comply with India's DPDP Act 2023."],
-  ['Which cities?', 'Delhi is live. Kolkata, Mumbai and Chennai are in preview and open fully as their models are validated.'],
+  ['Which cities?', 'Delhi, Kolkata, Mumbai and Chennai are live on the regional CAMS forecast, which the app labels "Data: limited". Each city gets its street-level model as that model is validated.'],
 ];
 const LAYERS: [string, string][] = [['Forecast', "The city's air, 0–72 h ahead."], ['Follow', 'Your route, vehicle and rooms.'], ['Recommend', 'A lower dose, and how sure.']];
 const OPS = [

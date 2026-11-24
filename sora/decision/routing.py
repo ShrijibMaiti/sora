@@ -270,6 +270,9 @@ def plan(req) -> dict:
         if tb.dep != base.dep and tb.road_air < base.road_air:
             lines.append(f"Leaving at {hhmm(tb.dep)} instead of {hhmm(base.dep)}: air along the way is forecast at about "
                          f"{tb.road_air:.0f} µg/m³ then, against {base.road_air:.0f} µg/m³.")
+        if tb.dep != base.dep and tb.minutes < base.minutes - 2:
+            lines.append(f"Leaving at {hhmm(tb.dep)} misses the rush: about {tb.minutes:.0f} min on the road instead of "
+                         f"{base.minutes:.0f}, so less time breathing traffic air.")
         if not np.array_equal(tb.edges, base.edges):
             names = avoided_roads(ctx, base, tb)
             lines.append(f"This route keeps {main_share(ctx, tb):.0%} of the distance on main roads, against "

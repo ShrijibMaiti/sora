@@ -48,8 +48,11 @@ City[] = {
 
 Hourly forecast field for one pollutant, 0–72 h (spec §18). Errors: `not_built`, `unavailable`, `unknown_city`, `upstream`.
 
-Backend status: PM2.5 only, CAMS background on a 12×12 grid with a fixed log-normal error band (`degradation: "L5"`),
-no stations yet (`stations: []`, `coverage` all 0: the UI then treats every cell as having data).
+Backend status: all six pollutants from the CAMS global forecast on a 12×12 grid, each with a fixed log-normal error
+band (wider for NO₂ and SO₂, which CAMS resolves poorly at city scale; `degradation: "L5"`). A pollutant with no CAMS
+data answers `unavailable`. The planner (`/plan`, `/day`, `/counterfactual`) uses PM2.5 only. No stations are
+assimilated yet (`coverage` all 0: the UI then treats every cell as having data); `stations` lists OpenAQ monitors for
+display when a key is set.
 
 Planner backend (`sora/decision/`): routes on the OSM graph for `route_bbox`, typical speeds by road class with a rush-hour
 factor, fixed microenvironment and near-road priors (spec §21.4), and 128 shared field samples for every band and
@@ -181,6 +184,9 @@ Abnormal-episode alerts (spec §30).
   title: string; body: string; start: ISO; end: ISO | null;
   severity: "warning" | "info" | "success"; probability: number }[]
 ```
+
+Sources today: `inversion` (forecast mixing height + wind), `rain` (forecast precipitation), `fire` (FIRMS detections
+upwind, needs `FIRMS_MAP_KEY`), `festival` (calendar: Diwali, Bhogi; `sora/events/calendar.py`). Sorted by `start`.
 
 ## GET /api/places?city={key}
 

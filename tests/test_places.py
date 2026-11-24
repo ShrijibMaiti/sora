@@ -28,7 +28,8 @@ def test_places_endpoint():
     assert set(r["places"][0]) == {"key", "name", "sub", "lat", "lon", "building"}
     assert r["example"]["trip"]["origin"] == "saket" and r["example"]["day"][0]["name"] == "Home"
     assert next(p for p in r["places"] if p["key"] == "greenpark")["building"] == "ac_filtered"
-    assert client.get("/api/places?city=kolkata").json()["detail"]["code"] == "not_built"
+    keys = [p["key"] for c in config.PLACES for p in config.PLACES[c]]
+    assert len(keys) == len(set(keys)), "place keys are global in the app; they must not repeat across cities"
 
 
 def test_search_ranks_featured_then_osm_then_streets():

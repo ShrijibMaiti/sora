@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from sora import pipeline
 from sora.api.main import app
 from sora.data import fires, openaq, openmeteo
-from sora.events import detect
+from sora.events import calendar, detect
 from sora.field import forecast
 
 client = TestClient(app)
@@ -99,6 +99,32 @@ def test_smoke_alert_needs_fires_upwind():
     assert len(fire) == 1 and "to the west" in fire[0]["body"] and fire[0]["start"] == "t00"
     assert not [e for e in detect.from_forecast(met(wind_from=90), west, center) if e["kind"] == "fire"]  # blowing away
     assert not [e for e in detect.from_forecast(met(wind_from=270), west[:5], center) if e["kind"] == "fire"]  # too few
+
+
+def test_overpass_retries_busy_errors(monkeypatch, tmp_path):
+    from sora.data import osm
+    answers = [503, 504, 200]
+    monkeypatch.setattr(osm.time, "sleep", lambda s: None)
+    monkeypatch.setattr(osm.httpx, "post", lambda url, **k: httpx.Response(answers.pop(0), content=b'{"elements": []}',
+                                                                           request=httpx.Request("POST", url)))
+    osm._query("q", tmp_path / "a.json")
+    assert (tmp_path / "a.json").read_bytes() == b'{"elements": []}' and not answers
+    answers[:] = [502, 502, 502]
+    with pytest.raises(httpx.HTTPStatusError):
+        osm._query("q", tmp_path / "b.json")
+    assert not (tmp_path / "b.json").exists()
+
+
+def test_festival_calendar():
+    window = ["2027-10-29T00:00:00Z", "2027-10-31T23:00:00Z"]
+    (diwali,) = calendar.upcoming("delhi", window)
+    assert diwali["kind"] == "festival" and diwali["start"] == "2027-10-29T12:30:00Z"  # 18:00 IST
+    assert diwali["end"] == "2027-10-30T00:30:00Z" and diwali["severity"] == "warning"
+    assert [e["title"] for e in calendar.upcoming("chennai", ["2027-01-13T12:00:00Z", "2027-01-16T12:00:00Z"])] == ["Bhogi bonfires"]
+    assert calendar.upcoming("delhi", ["2027-01-13T12:00:00Z", "2027-01-16T12:00:00Z"]) == []  # Bhogi is Chennai's
+    assert calendar.upcoming("delhi", ["2027-11-05T00:00:00Z", "2027-11-08T00:00:00Z"]) == []  # nothing in the window
+    for date, *_ in calendar.FESTIVALS:
+        assert date >= "2027-01-01"  # past entries get pruned when the table is extended
 
 
 def test_pipeline_run_once_and_health(monkeypatch):

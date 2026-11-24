@@ -27,6 +27,7 @@ def cities():
 @router.get("/field")
 def field(city: str, pollutant: Pollutant = "pm25"):
     c = city_or_fail(city)
-    if pollutant != "pm25":
-        fail(404, "unavailable", f"Sora forecasts PM2.5 only in {c.name} for now.")
-    return forecast_or_fail(city)["field"]
+    f = forecast_or_fail(city)["fields"].get(pollutant)
+    if f is None:
+        fail(404, "unavailable", f"There is no {pollutant.upper()} forecast for {c.name} right now.")
+    return f

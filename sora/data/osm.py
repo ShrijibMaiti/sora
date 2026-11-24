@@ -1,5 +1,6 @@
 """Road network from OpenStreetMap via Overpass (spec §11.6, §13.3)."""
 import json
+import time
 
 import httpx
 import networkx as nx
@@ -8,14 +9,27 @@ from ..geo import haversine_m
 
 URL = "https://overpass-api.de/api/interpreter"
 HIGHWAY_RE = "^((motorway|trunk|primary|secondary|tertiary)(_link)?|unclassified|residential|living_street|pedestrian)$"
+RETRY_STATUS = {429, 502, 503, 504}  # Overpass sheds load with these; a later try usually succeeds
+
+
+def _query(q, path, attempts=3, wait_s=15):
+    """Run an Overpass query and write the answer to path; retries busy-server errors and timeouts."""
+    for i in range(attempts):
+        try:
+            r = httpx.post(URL, data={"data": q}, headers={"User-Agent": "sora-research/0.1"}, timeout=240)
+            if r.status_code not in RETRY_STATUS or i == attempts - 1:
+                r.raise_for_status()
+                path.write_bytes(r.content)
+                return
+        except httpx.TimeoutException:
+            if i == attempts - 1:
+                raise
+        time.sleep(wait_s * (i + 1))
 
 
 def fetch(bbox, path):
     s, w, n, e = bbox
-    q = f'[out:json][timeout:180];way["highway"~"{HIGHWAY_RE}"]({s},{w},{n},{e});out geom;'
-    r = httpx.post(URL, data={"data": q}, headers={"User-Agent": "sora-research/0.1"}, timeout=240)
-    r.raise_for_status()
-    path.write_bytes(r.content)
+    _query(f'[out:json][timeout:180];way["highway"~"{HIGHWAY_RE}"]({s},{w},{n},{e});out geom;', path)
 
 
 PLACE_QUERY = """[out:json][timeout:180];
@@ -34,9 +48,7 @@ PLACE_KINDS = ("place", "railway", "amenity", "leisure", "shop", "tourism")
 def fetch_places(bbox, path):
     """Named neighbourhoods, landmarks and everyday destinations (search, spec §7.2)."""
     s, w, n, e = bbox
-    r = httpx.post(URL, data={"data": PLACE_QUERY.format(b=f"{s},{w},{n},{e}")}, headers={"User-Agent": "sora-research/0.1"}, timeout=240)
-    r.raise_for_status()
-    path.write_bytes(r.content)
+    _query(PLACE_QUERY.format(b=f"{s},{w},{n},{e}"), path)
 
 
 def load_places(path):

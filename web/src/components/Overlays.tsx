@@ -40,7 +40,7 @@ export function FullState() {
   const city = cityOf(st.city);
   const s = st.demo === 'offline' || st.offline
     ? { icon: 'cloud-off', ibg: 'var(--danger-soft)', ifg: 'var(--danger)', title: "Can't reach Sora", body: "We couldn't load the forecast. Rather than show you stale advice, the map is paused. Check your connection — we'll keep retrying.", pLabel: 'Retry now', primary: () => applyDemo('loading'), sLabel: st.demo === 'offline' ? 'Use last forecast (13:00)' : '', secondary: () => applyDemo('degraded'), foot: `GET /api/field?city=${st.city} failed` }
-    : !city.built
+    : !city.built || st.demo === 'notbuilt' // the preview state forces it: every configured city is live today
       ? { icon: 'construction', ibg: 'var(--surface-raised)', ifg: 'var(--text-primary)', title: `${city.name} isn't built yet`, body: `${city.note} The model for ${city.name} is still being validated, so Sora won't give advice here yet.`, pLabel: 'Back to Delhi', primary: () => set({ city: 'delhi', demo: 'none' }), sLabel: "Notify me when it's live", secondary: () => { notifyWhenLive(city.key); set({ city: 'delhi', demo: 'none' }); }, foot: 'Status: Preview · forecasts visible to the research team only' }
       : null;
   if (!s) return null;
