@@ -1,168 +1,35 @@
 # Sora — Urban Personal Exposure Digital Twin
 
-Source of truth: [`docs/sora_master_spec.md`](docs/sora_master_spec.md). Section numbers (§) below refer to it.
-API between `web/` and `sora/api/`: [`docs/api_contract.md`](docs/api_contract.md).
-Tiers: **T0** MVP · **T1** Competition · **T2** Research.
+Sora estimates the air pollution **you** breathe, not just the city's air quality: it combines a 0–72 h PM2.5 forecast
+with where you go, when, how you travel and the buildings you spend time in, then suggests routes, departure times
+and day plans that lower your dose, with an honest confidence for each suggestion.
 
-## File tree
-
-```text
-sora/
-├── README.md
-├── pyproject.toml                    Python package + deps
-├── docs/                             spec, original plan, session history
-│
-├── configs/
-│   ├── cities/{delhi,kolkata,mumbai,chennai}.yaml   bbox, grid, demo area, station list      §3.3
-│   ├── sim/wrfchem_namelist.template                India parent + 4 city nests               §17.4  T1
-│   ├── sim/ensemble.yaml                            met/emission perturbations, periods       §34.2  T1
-│   └── experiments/{baselines,operator,ablations}.yaml                                        §35–36
-│
-├── sora/                             ── ML + backend (Python) ──
-│   ├── config.py · geo.py            constants, projections
-│   ├── pipeline.py                   hourly cycle: ingest → QC → assimilate → forecast → samples  §18.2
-│   │
-│   ├── data/                         L1 ingestion                                              §11
-│   │   ├── openmeteo.py              CAMS PM2.5 + ERA5/IFS met (point API)                     T0
-│   │   ├── openaq.py · cpcb.py       CAAQMS station PM2.5                                      T0
-│   │   ├── qc.py                     range / stuck / spike checks                              §12.4  T0
-│   │   ├── osm.py                    road network (Overpass)                                   T0
-│   │   ├── era5.py · cams.py         gridded reanalysis (CDS/ADS)                              T1
-│   │   ├── satellite.py              TROPOMI NO₂, MAIAC/INSAT AOD, GEMS                        T1
-│   │   ├── fires.py                  FIRMS active fires                                        T1
-│   │   ├── buildings.py              Open Buildings 2.5D heights                               T1
-│   │   ├── traffic.py                speeds + ARAI emission factors                            T1
-│   │   ├── inventories.py            EDGAR, APnA, SAFAR, FINN                                  T1
-│   │   └── campaign.py               mobile + personal-sensor data, calibration                T1
-│   │
-│   ├── fusion/                       L2 observation operators H_k, errors R_k                  §12.3  T1
-│   │   ├── obs_operators.py · errors.py · lowcost_calibration.py
-│   │
-│   ├── representation/               L3 hierarchical grid + road graph                          §13
-│   │   ├── grid.py · road_graph.py · mapping.py (grid↔graph) · static_features.py · wind_edges.py
-│   │
-│   ├── field/                        T0 field model                                            §43
-│   │   ├── correction.py             station-ML correction of CAMS + GP nowcast                T0
-│   │   ├── downscale_lur.py          land-use-regression street increments                     §15.2  T0
-│   │   ├── forecast.py               0–72 h fields, horizons                                   §18
-│   │   └── aqi.py                    India NAQI (display only)                                 §18.5
-│   │
-│   ├── physics/                      L4 physics layer                                          §14, §16
-│   │   ├── pde.py                    advection–diffusion–BLH residual                          T1
-│   │   ├── constraints.py            non-negativity, flux form, BCs                            T1
-│   │   ├── closure.py                learned chemistry term                                    T2
-│   │   └── inversion.py              emission inversion                                        T2
-│   │
-│   ├── operator/                     L4 neural operator (ADR-003)                              §17
-│   │   ├── fno.py · geofno.py        architectures                                             T1
-│   │   ├── assimilation.py           analysis step                                             T1
-│   │   ├── rollout.py                autoregressive 0–72 h                                     T1
-│   │   └── train.py                  sim pretrain → real fine-tune (data + physics + source)   §34
-│   │
-│   ├── gnn/                                                                                    §15
-│   │   ├── street_gnn.py             flux-form street-canyon GNN                               T1
-│   │   ├── station_stgnn.py          station ST-GNN (baselines B4/B5)                          T1
-│   │   └── train.py
-│   │
-│   ├── uncertainty/                  L6 joint samples + calibration                            §19
-│   │   ├── ensemble.py               model × met ensembles                                     T0
-│   │   ├── gp_sampler.py             separable space-time GP (SPDE baseline)                   T0
-│   │   ├── generative.py             diffusion / flow-matching sampler                         T1
-│   │   ├── conformal.py              adaptive conformal outer layer                            T1
-│   │   ├── coverage.py               observation-coverage index                                T0
-│   │   ├── calibration.py            CRPS, PIT, energy/variogram scores                        T1
-│   │   └── sobol.py                  variance decomposition                                    T2
-│   │
-│   ├── sim/                          Layer-A ground truth                                      §11.8, §17.4
-│   │   ├── toy_mixed_layer.py        fast 2-D solver for development                           T1
-│   │   ├── wrfchem.py · rline.py · sirane.py · palm.py   runners + output readers              T1/T2
-│   │   └── ensemble.py               ensemble generation                                       T1
-│   │
-│   ├── events/                       abnormal-episode detection                                §30    T1
-│   │   ├── detect.py (innovations) · attribution.py · calendar.py (Diwali, Bhogi, GRAP)
-│   │
-│   ├── mobility/                     L7 human trajectory                                       §20
-│   │   ├── trajectory.py             planned trajectories                                      T0
-│   │   ├── map_matching.py · stay_points.py · mode_inference.py                                T1
-│   │   └── travel_time.py            edge travel-time distributions                            T0
-│   │
-│   ├── exposure/                     L8 personal exposure                                      §21–22
-│   │   ├── microenv.py               modes, buildings, priors                                  T0
-│   │   ├── indoor.py                 dynamic mass-balance model                                T1
-│   │   ├── ventilation.py            activity → breathing rate                                 T0
-│   │   ├── dose.py                   path integral on samples                                  T0
-│   │   └── attribution.py            per-segment / per-cause                                   T1
-│   │
-│   ├── decision/                     L9 optimization                                           §23–26, §31
-│   │   ├── routing.py                candidate routes (TD multi-criteria)                      T0
-│   │   ├── departure.py              departure-time search                                     T0
-│   │   ├── schedule.py               whole-day DP / CP-SAT                                     T1
-│   │   ├── pareto.py · risk.py       Pareto front, CVaR, DRO                                   T0/T1/T2
-│   │   ├── confidence.py             paired P(improvement), CIs                                T0
-│   │   ├── counterfactual.py         "what if" engine                                          T1
-│   │   └── voi.py                    value of information                                      T2
-│   │
-│   ├── assistant/                    L10                                                       §28–29
-│   │   ├── explain.py                explanation object + templates                            T0
-│   │   ├── proactive.py              trigger rule                                              T2
-│   │   └── nl_interface.py           optional LLM interface (ADR-014)                          Experimental
-│   │
-│   ├── personal/                     L11 personal twin (on-device logic)                       §27    T2
-│   │   ├── patterns.py · preferences.py · closed_loop.py
-│   │
-│   ├── baselines/                    B0–B3                                                     §35
-│   │   ├── persistence.py · arima.py · tree_models.py · lstm.py
-│   │
-│   ├── eval/                         metrics, blocked/LOCO splits, ablation runner             §34.6, §36–37
-│   │   ├── metrics.py · splits.py · ablations.py
-│   │
-│   └── api/                          FastAPI backend                                           §41.2
-│       ├── main.py · schemas.py
-│       └── routes/field.py · plan.py · counterfactual.py · events.py
-│
-├── scripts/                          CLI entry points
-│   ├── build_city.py · run_simulations.py · train_operator.py · train_street_gnn.py
-│   └── run_baselines.py · run_ablations.py
-│
-├── tests/
-│   ├── conftest.py
-│   └── test_{qc,aqi,physics,operator,uncertainty,dose,decision,api}.py
-│
-└── web/                              ── Frontend (Vite + React 18 + TypeScript + Leaflet) ──
-    ├── package.json · tsconfig.json · vite.config.ts · index.html
-    ├── DESIGN.md                                      design system documentation
-    ├── README.md                                      run/build, deep links
-    └── src/
-        ├── main.tsx · App.tsx                         "/" landing, "/app" application
-        ├── design/tokens.css                          design tokens (source of truth)
-        ├── landing/Landing.tsx · landing.css          landing page + hero
-        ├── styles/app.css                             app styles
-        ├── state/store.tsx                            app state, plan runner, theme, onboarding
-        ├── api/types.ts · client.ts · mock.ts         API layer (docs/api_contract.md); mock by default
-        ├── data/sora.ts                               Delhi model behind the mock; landing/styleguide content
-        ├── lib/field.ts · time.ts · layout.ts         field sampling, IST times, rail / panel geometry
-        ├── styleguide/Styleguide.tsx                  /styleguide design system page
-        └── components/
-            ├── Chrome.tsx                             top bars / rail                         §7
-            ├── MapView.tsx · MapChrome.tsx            Leaflet field map + map controls        §7.4
-            ├── SidePanel.tsx · Overlays.tsx           slide-over panel, overlays/states
-            ├── Insights.tsx                           exposure history                        §22.6
-            ├── Icon.tsx
-            └── panels/LivePanel.tsx · TripPanel.tsx · DayPanel.tsx · WhatIfPanel.tsx · shared.tsx
-```
+- Source of truth: [`docs/sora_master_spec.md`](docs/sora_master_spec.md). Section numbers (§) below refer to it.
+- API between `web/` and `sora/api/`: [`docs/api_contract.md`](docs/api_contract.md).
+- Design system: [`web/DESIGN.md`](web/DESIGN.md).
+- Tiers: **T0** MVP · **T1** Competition · **T2** Research.
 
 ## Status
 
-- **Backend/ML:** mostly placeholders. Working: data modules (`data/openmeteo.py`, `openaq.py`, `qc.py`, `osm.py`),
-  the API (`api/main.py`, `routes/field.py`, `routes/events.py`) serving `/api/cities`, a live CAMS PM2.5 field for Delhi
-  (`field/forecast.py`, degradation L5), forecast-driven alerts (`events/detect.py`), and the planner
-  (`decision/routing.py` trip, `schedule.py` day, `counterfactual.py` what-if) on the OSM road graph
-  (`representation/road_graph.py`, downloaded once to `data_cache/`, ~40 s) with paired confidence on shared samples
-  (`uncertainty/ensemble.py`, `decision/confidence.py`). `pipeline.py` rebuilds the field just after every hour;
-  OpenAQ station status and FIRMS fires (`data/fires.py`) are shown on the map and drive the smoke alert when their
-  keys are set, but are not assimilated (the field stays CAMS-only, L5).
-- **Frontend (`web/`):** landing page and app UI built. `npm run dev` uses the in-browser mock; production builds call
-  the real API. Override with `VITE_USE_MOCK=true|false`.
+**Live for Delhi** (Kolkata, Mumbai and Chennai are listed as Preview). Everything outside the ML layers is built:
+
+| Area | What works |
+|---|---|
+| Forecast | Hourly 0–72 h PM2.5 field from the CAMS global forecast (Open-Meteo) on a 12×12 grid, with a fixed log-normal uncertainty band; rebuilt just after every hour. Labelled degradation **L5 "CAMS only"**: no station correction or street-scale downscaling yet (that is the ML work). |
+| Alerts | Stagnant air (low mixing height + calm wind), rain washout, and smoke from upwind fires, from the weather forecast and FIRMS detections. |
+| Stations, fires | OpenAQ station status and NASA FIRMS fires on the map when their keys are set. Shown, not assimilated. |
+| Trip planning | Routes on the OSM road network × departure times in your window, dose over a common window (indoors before and after included), 128 shared field samples for every range and "chance it's lower" (spec §23, §24, §31). |
+| Day planning | Whole-day schedule (07:00–23:00): alternative places and departure shifts within your extra-travel budget (spec §25). |
+| What if | Leave later, change mode, change destination / building, stay in during the peak (spec §26). |
+| Places | Featured places and an example trip and day per city; search over ~2,500 OSM neighbourhoods, stations, destinations and roads, served by Sora's own API. |
+| Web app | Landing page, map app (Live, Trip, Day, What if, Insights), `/styleguide`. Insights shows the days you planned, kept on your device only. |
+| Ops | One process serves API + app, gzip, `/api/health`, Docker image, CI, browser smoke test. |
+
+Placeholders (empty files in the tree below): the T0 field model (station ML + LUR), physics, neural operator, GNNs,
+generative uncertainty, simulators, mobility inference, personal twin, baselines and evaluation.
+
+Shortcuts the answers state in their caveats: fixed microenvironment, near-road and speed priors instead of fitted
+values and live traffic; metro approximated along roads; field uncertainty from a fixed prior, not an ensemble.
 
 ## Run
 
@@ -170,9 +37,10 @@ Development (two terminals):
 
 ```
 pip install -e ".[dev]"
-uvicorn sora.api.main:app --reload            # API on :8000; first start fetches CAMS (~10 s) and the OSM graph (~40 s)
+uvicorn sora.api.main:app --reload            # API on :8000. First start fetches CAMS (~10 s), the OSM road graph (~40 s)
+                                              # and the OSM place names (~40 s); the OSM files are cached in data_cache/
 cd web; npm install
-$env:VITE_USE_MOCK='false'; npm run dev       # app on :5173 against the API (omit the variable for the mock)
+$env:VITE_USE_MOCK='false'; npm run dev       # app on :5173 against the API (omit the variable for the in-browser mock)
 pytest                                        # backend tests on synthetic data, no network
 ```
 
@@ -187,12 +55,134 @@ python scripts/smoke.py http://localhost:8000  # release check in a real browser
 Docker: `docker build -t sora .` then `docker run -p 8000:8000 -v sora-data:/data sora`. `/api/health` returns 200
 while every live city has a field to serve, and the image's HEALTHCHECK uses it.
 
+`npm run dev` uses the in-browser mock (Delhi demo data); production builds call the real API. Override either with
+`VITE_USE_MOCK=true|false`.
+
 | Variable | Default | Purpose |
 |---|---|---|
 | `OPENAQ_API_KEY` | unset | Station status on the map ([free key](https://explore.openaq.org/register)) |
 | `FIRMS_MAP_KEY` | unset | Active fires and the upwind-smoke alert ([free key](https://firms.modaps.eosdis.nasa.gov/api/map_key/)) |
-| `SORA_CACHE` | `data_cache/` (`/data` in Docker) | OSM road graph cache |
+| `SORA_CACHE` | `data_cache/` (`/data` in Docker) | OSM road graph and place-name cache |
 | `SORA_WEB_DIST` | `web/dist` | Built web app to serve; nothing is served if the folder is missing |
 | `SORA_LOG_LEVEL` | `INFO` | Python log level |
 
 CI (`.github/workflows/ci.yml`) runs the backend tests, the web typecheck and build, and the Docker build.
+
+## API
+
+All under `/api`, JSON; full shapes and error codes in [`docs/api_contract.md`](docs/api_contract.md).
+
+| Endpoint | |
+|---|---|
+| `GET /cities` | Cities, status, field and routable extents |
+| `GET /places?city=` | Featured places + the example trip and day |
+| `GET /search?city=&q=` | Place search (OSM names, roads, featured places) |
+| `GET /field?city=&pollutant=` | 0–72 h field: median, 90% band, wind, stations, fires, data status |
+| `GET /events?city=` | Forecast alerts |
+| `POST /plan` | Route × departure options for one trip |
+| `POST /day` | Optimized whole day |
+| `POST /counterfactual` | "What if" on a trip |
+| `GET /health` | Uptime check |
+
+Adding a city: set `built=True` in `sora/config.py` `CITIES` and add its entries to `PLACES` and `EXAMPLES`
+(a test checks every featured place is routable and every example uses featured places).
+
+## File tree
+
+`●` = implemented; everything else is a placeholder for later tiers.
+
+```text
+sora/
+├── README.md · pyproject.toml · Dockerfile · .dockerignore
+├── .github/workflows/ci.yml          ● tests, web build, Docker build
+├── docs/                             spec, API contract, original plan, session history
+│
+├── configs/                          placeholders (city / sim / experiment YAML)
+│   ├── cities/{delhi,kolkata,mumbai,chennai}.yaml                                              §3.3
+│   ├── sim/wrfchem_namelist.template · ensemble.yaml                                           §17.4, §34.2  T1
+│   └── experiments/{baselines,operator,ablations}.yaml                                         §35–36
+│
+├── sora/                             ── backend + ML (Python) ──
+│   ├── config.py                     ● cities, featured places, example trip/day, constants   §3.3
+│   ├── geo.py                        ● distances, projections
+│   ├── pipeline.py                   ● hourly refresh of field, road graph, place index       §18.2
+│   │
+│   ├── data/                         L1 ingestion                                              §11
+│   │   ├── openmeteo.py              ● CAMS PM2.5 + ERA5/IFS met (point API)                    T0
+│   │   ├── openaq.py                 ● station status + hourly PM2.5 (OpenAQ v3)                T0
+│   │   ├── qc.py                     ● range / stuck / spike checks                             §12.4  T0
+│   │   ├── osm.py                    ● road network + place names (Overpass)                    T0
+│   │   ├── fires.py                  ● FIRMS active fires                                       §11.3
+│   │   ├── cpcb.py · era5.py · cams.py · satellite.py · buildings.py · traffic.py              T1
+│   │   └── inventories.py · campaign.py                                                        T1
+│   │
+│   ├── fusion/                       L2 obs_operators.py · errors.py · lowcost_calibration.py  §12.3  T1
+│   ├── representation/               L3                                                        §13
+│   │   ├── road_graph.py             ● OSM graph as arrays, snapping, scipy shortest paths
+│   │   ├── places.py                 ● place search index (featured + OSM names + roads)
+│   │   └── grid.py · mapping.py · static_features.py · wind_edges.py
+│   │
+│   ├── field/                        T0 field model                                            §43
+│   │   ├── forecast.py               ● 0–72 h field (CAMS, L5), cache, stale fallback, backoff  §18
+│   │   └── correction.py · downscale_lur.py · aqi.py        station ML, LUR, NAQI             T0
+│   │
+│   ├── physics/ · operator/ · gnn/   L4 physics layer, neural operator, street GNN             §14–17  T1/T2
+│   ├── sim/                          Layer-A simulators                                        §11.8   T1/T2
+│   │
+│   ├── uncertainty/                  L6                                                        §19
+│   │   ├── ensemble.py               ● joint field samples for paired comparisons (fixed prior)
+│   │   └── gp_sampler.py · generative.py · conformal.py · coverage.py · calibration.py · sobol.py
+│   │
+│   ├── events/                       abnormal episodes                                         §30
+│   │   ├── detect.py                 ● stagnation, rain, upwind-smoke alerts from forecasts
+│   │   └── attribution.py · calendar.py
+│   │
+│   ├── mobility/                     L7 trajectory.py · map_matching.py · stay_points.py · …   §20
+│   │
+│   ├── exposure/                     L8                                                        §21–22
+│   │   ├── microenv.py               ● modes, buildings, breathing rates, near-road priors
+│   │   ├── dose.py                   ● inhaled dose on samples, indoor dwell
+│   │   └── indoor.py · ventilation.py · attribution.py
+│   │
+│   ├── decision/                     L9                                                        §23–26, §31
+│   │   ├── routing.py                ● route × departure planning (/api/plan)
+│   │   ├── schedule.py               ● whole-day optimization (/api/day)
+│   │   ├── counterfactual.py         ● what-if engine (/api/counterfactual)
+│   │   ├── confidence.py             ● paired P(improvement), bands, "not reliably different"
+│   │   └── departure.py · pareto.py · risk.py · voi.py
+│   │
+│   ├── assistant/ · personal/        L10 explanations / proactive, L11 personal twin          §27–29
+│   ├── baselines/ · eval/            B0–B3, metrics, splits, ablations                         §34–37
+│   │
+│   └── api/                          FastAPI                                                   §41.2
+│       ├── main.py                   ● app, errors, gzip, /health, serves web/dist, hourly pipeline
+│       ├── schemas.py                ● request models, contract errors
+│       └── routes/field.py · events.py · plan.py · places.py   ● (counterfactual.py: placeholder, lives in plan.py)
+│
+├── scripts/
+│   ├── smoke.py                      ● end-to-end browser check of a running deployment
+│   └── build_city.py · run_simulations.py · train_operator.py · train_street_gnn.py · run_baselines.py · run_ablations.py
+│
+├── tests/                            ● synthetic data and a synthetic street grid, no network
+│   ├── conftest.py · test_api.py · test_decision.py · test_pipeline.py · test_places.py
+│   └── test_{qc,aqi,physics,operator,uncertainty,dose}.py   placeholders
+│
+└── web/                              ── Frontend (Vite + React 18 + TypeScript + Leaflet) ──
+    ├── package.json · tsconfig.json · vite.config.ts · index.html · scripts/spa-routes.mjs
+    ├── DESIGN.md · README.md
+    └── src/
+        ├── main.tsx · App.tsx                         "/" landing, "/app" application, "/styleguide"
+        ├── design/tokens.css                          design tokens (source of truth)
+        ├── landing/Landing.tsx · landing.css          landing page; live preview via the API
+        ├── state/store.tsx                            app state, API loading, places, plan/day/what-if runners,
+        │                                              on-device history, reminders
+        ├── api/types.ts · client.ts · mock.ts         API layer; mock = in-browser backend for `npm run dev`
+        ├── data/sora.ts                               UI constants (AQI, modes, routes) + Delhi demo data and model
+        │                                              behind the mock and the fail-safes
+        ├── lib/field.ts · time.ts · layout.ts         field sampling, IST times, layout geometry
+        ├── styleguide/Styleguide.tsx                  design system page
+        └── components/
+            ├── Chrome.tsx · MapView.tsx · MapChrome.tsx · SidePanel.tsx · Overlays.tsx · Icon.tsx
+            ├── Insights.tsx                           planned-day history + suggestions (on device)
+            └── panels/LivePanel.tsx · TripPanel.tsx · DayPanel.tsx · WhatIfPanel.tsx · shared.tsx
+```
