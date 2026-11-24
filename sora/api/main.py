@@ -1,14 +1,38 @@
 """Sora HTTP API (docs/api_contract.md). Run: uvicorn sora.api.main:app --reload (Vite forwards /api to :8000)."""
+import logging
+import threading
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from .routes import events, field
-from .schemas import fail
+from .. import config
+from ..field import forecast
+from ..representation import road_graph
+from .routes import events, field, plan
 
-app = FastAPI(title="Sora API", version="1")
-app.include_router(field.router, prefix="/api")
-app.include_router(events.router, prefix="/api")
+
+def warm():
+    """Fetch the field and road graph for live cities before the first user asks (~10 s + ~40 s cold)."""
+    for key, c in config.CITIES.items():
+        if c.built:
+            try:
+                forecast.get(key)
+                road_graph.get(key)
+            except Exception:  # the request path reports upstream errors properly; warming is best-effort
+                logging.getLogger("sora").exception("warm-up failed for %s", key)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    threading.Thread(target=warm, daemon=True).start()
+    yield
+
+
+app = FastAPI(title="Sora API", version="1", lifespan=lifespan)
+for r in (field.router, events.router, plan.router):
+    app.include_router(r, prefix="/api")
 
 
 @app.exception_handler(RequestValidationError)
@@ -17,11 +41,3 @@ async def invalid(_: Request, exc: RequestValidationError):
     e = exc.errors()[0]
     where = ".".join(str(x) for x in e["loc"][1:]) or "request"
     return JSONResponse(status_code=400, content={"detail": {"code": "invalid", "message": f"{where}: {e['msg']}"}})
-
-
-# shortcut: planner endpoints answer not_built until the routing/day/what-if backend lands (waves 2–3)
-@app.post("/api/plan")
-@app.post("/api/day")
-@app.post("/api/counterfactual")
-def planner_not_live():
-    fail(404, "not_built", "Trip and day planning aren't live on Sora's server yet. The forecast map and alerts are.")

@@ -155,8 +155,10 @@ sora/
 
 - **Backend/ML:** mostly placeholders. Working: data modules (`data/openmeteo.py`, `openaq.py`, `qc.py`, `osm.py`),
   the API (`api/main.py`, `routes/field.py`, `routes/events.py`) serving `/api/cities`, a live CAMS PM2.5 field for Delhi
-  (`field/forecast.py`, degradation L5) and forecast-driven alerts (`events/detect.py`). Trip, day and what-if answer
-  `not_built` for now.
+  (`field/forecast.py`, degradation L5), forecast-driven alerts (`events/detect.py`), and the planner
+  (`decision/routing.py` trip, `schedule.py` day, `counterfactual.py` what-if) on the OSM road graph
+  (`representation/road_graph.py`, downloaded once to `data_cache/`, ~40 s) with paired confidence on shared samples
+  (`uncertainty/ensemble.py`, `decision/confidence.py`).
 - **Frontend (`web/`):** landing page and app UI built; mock backend by default, real backend with `VITE_USE_MOCK=false`.
 
 ```

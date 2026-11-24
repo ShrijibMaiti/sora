@@ -3,8 +3,8 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import numpy as np
-import pandas as pd
 import pytest
+from conftest import fake_points
 from fastapi.testclient import TestClient
 
 from sora import config
@@ -14,30 +14,6 @@ from sora.events import detect
 from sora.field import forecast
 
 client = TestClient(app)
-N = config.GRID_N ** 2
-
-
-def fake_points(blh=None, rain=None, wind_from=270.0):
-    def fetch(lats, lons, past_days, forecast_days):
-        day0 = pd.Timestamp.now(tz="UTC").floor("D")
-        times = pd.date_range(day0, periods=24 * forecast_days, freq="h")
-        T = len(times)
-        pm = 80 + 40 * np.sin(np.arange(T) / 24 * 2 * np.pi)[:, None] + np.linspace(0, 20, N)[None, :]
-        pm[-1, 0] = np.nan  # CAMS tail gap
-        col = lambda v: np.repeat(np.asarray(v, float).reshape(-1, 1) if np.ndim(v) else np.full((T, 1), v), N, 1)
-        return times, {
-            "pm2_5": pm, "wind_speed_10m": col(2.0), "wind_direction_10m": col(wind_from),
-            "boundary_layer_height": col(blh if blh is not None else 800.0),
-            "precipitation": col(rain if rain is not None else 0.0),
-            "temperature_2m": col(20.0), "relative_humidity_2m": col(50.0),
-        }
-    return fetch
-
-
-@pytest.fixture(autouse=True)
-def fresh(monkeypatch):
-    forecast._cache.clear()
-    monkeypatch.setattr(openmeteo, "fetch_points", fake_points())
 
 
 def test_cities_lists_all_with_delhi_live():
@@ -78,12 +54,6 @@ def test_errors_use_contract_body(url, status, code):
     r = client.get(url)
     assert r.status_code == status
     assert r.json()["detail"]["code"] == code and r.json()["detail"]["message"]
-
-
-def test_planner_endpoints_say_not_built():
-    for path in ("/api/plan", "/api/day", "/api/counterfactual"):
-        r = client.post(path, json={})
-        assert r.status_code == 404 and r.json()["detail"]["code"] == "not_built"
 
 
 def test_upstream_failure_serves_stale_then_503(monkeypatch):

@@ -44,6 +44,13 @@ export function fieldMean(F: Field, t: number): Band {
 
 export const fieldSeries = (F: Field) => F.times.map((_, t) => fieldMean(F, t));
 
+/** IST midnight (epoch ms) of the day "Plan my day" covers (07:00–23:00): the forecast's first day, or the next one
+    once its 07:00 has passed, so the whole day is inside the forecast. Same rule as sora/decision/schedule.py. */
+export function planDay0(F: Field) {
+  const d = istDayStart(F.times[0]);
+  return Date.parse(F.times[0]) > d + 7 * 3600e3 ? d + 86400e3 : d;
+}
+
 /** "Today 18:00" style label relative to the forecast start. */
 export function relDay(iso: string, refIso: string) {
   const d = Math.round((istDayStart(iso) - istDayStart(refIso)) / 86400e3);

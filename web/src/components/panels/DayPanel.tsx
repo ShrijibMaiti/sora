@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { BUILDINGS, ME, PLACES, dayBars, hhmm, type BuildingKey, type DaySeg } from '../../data/sora';
 import { NEW_STOP, activeField, useSora, type DayStop } from '../../state/store';
 import { istDay } from '../../lib/time';
+import { planDay0 } from '../../lib/field';
 import { Select } from '../Chrome';
 import { Icon } from '../Icon';
 import { Disclaimer, Dl, PanelHeader, SubTabs } from './shared';
@@ -67,7 +68,7 @@ export function DayPanel() {
       {/* answer-first once optimized; while editing, the heading says what the button will do */}
       {!dirty && st.dayDone
         ? <PanelHeader title={T.p >= 0.7 ? `Your day: about ${T.red.median}% less exposure` : 'Your day is already close to its best'}
-            sub={<><span className="tnum">{fmt(T.orig.median)} → {fmt(T.opt.median)} µg</span> <span className="mono" style={{ color: 'var(--text-tertiary)' }}>({fmt(T.opt.p05)}–{fmt(T.opt.p95)})</span>, +{T.extra} min travel, {Math.round(T.p * 100)}% likely lower. {DAY.changes.length} change{DAY.changes.length === 1 ? '' : 's'} for {F ? istDay(F.times[0]) : 'today'}.</>} />
+            sub={<><span className="tnum">{fmt(T.orig.median)} → {fmt(T.opt.median)} µg</span> <span className="mono" style={{ color: 'var(--text-tertiary)' }}>({fmt(T.opt.p05)}–{fmt(T.opt.p95)})</span>, +{T.extra} min travel, {Math.round(T.p * 100)}% likely lower. {DAY.changes.length} change{DAY.changes.length === 1 ? '' : 's'} for {F ? istDay(new Date(planDay0(F)).toISOString()) : 'today'}.</>} />
         : <PanelHeader title={`Plan ${COUNT[n - 2] ?? n} stops together`}
             sub={<>Sora weighs the whole day at once: when you leave, which gym, how you get to dinner.</>} />}
       <SubTabs label="Day plan" items={st.dayDone ? [['schedule', 'Schedule'], ['result', 'Result'], ['changes', 'Changes'], ['timeline', 'Timeline']] : [['schedule', 'Schedule']]} value={sub} onPick={(k) => set((s) => ({ sub: { ...s.sub, day: k } }))} />

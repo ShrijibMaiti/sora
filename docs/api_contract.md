@@ -49,8 +49,12 @@ City[] = {
 Hourly forecast field for one pollutant, 0–72 h (spec §18). Errors: `not_built`, `unavailable`, `unknown_city`, `upstream`.
 
 Backend status: PM2.5 only, CAMS background on a 12×12 grid with a fixed log-normal error band (`degradation: "L5"`),
-no stations yet (`stations: []`, `coverage` all 0: the UI then treats every cell as having data). `/api/plan`, `/api/day`
-and `/api/counterfactual` answer `not_built` until the planner backend lands.
+no stations yet (`stations: []`, `coverage` all 0: the UI then treats every cell as having data).
+
+Planner backend (`sora/decision/`): routes on the OSM graph for `route_bbox`, typical speeds by road class with a rush-hour
+factor, fixed microenvironment and near-road priors (spec §21.4), and 128 shared field samples for every band and
+`p_better`. Every dose (plan options and what-if) covers the same window, from `earliest` to the latest possible
+arrival, including indoor time at both ends.
 
 ```ts
 {
