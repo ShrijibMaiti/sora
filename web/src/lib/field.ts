@@ -27,18 +27,29 @@ export function sampleField(F: Field, t: number, lat: number, lon: number): Samp
   return { median, p05, p95, cat: cat(median, F.pollutant), coverage: bil(F.coverage, y, x), spread: median > 0 ? (p95 - p05) / median : 0 };
 }
 
+/** Coverage below which a cell counts as no-data. A background-only field (no stations assimilated, coverage 0
+    everywhere) still has a forecast in every cell, so nothing is masked. */
+export const covFloor = (F: Field) => (F.coverage.some((row) => row.some((c) => c >= 0.05)) ? 0.05 : -Infinity);
+
 /** City average over cells with some observation coverage (the populated area). */
 export function fieldMean(F: Field, t: number): Band {
-  const ti = Math.max(0, Math.min(lastHour(F), Math.round(t)));
+  const ti = Math.max(0, Math.min(lastHour(F), Math.round(t))), floor = covFloor(F);
   let m = 0, lo = 0, hi = 0, n = 0;
   F.coverage.forEach((row, y) => row.forEach((c, x) => {
-    if (c < 0.05) return;
+    if (c < floor) return;
     m += F.median[ti][y][x]; lo += F.p05[ti][y][x]; hi += F.p95[ti][y][x]; n++;
   }));
   return n ? { median: m / n, p05: lo / n, p95: hi / n } : { median: 0, p05: 0, p95: 0 };
 }
 
 export const fieldSeries = (F: Field) => F.times.map((_, t) => fieldMean(F, t));
+
+/** IST midnight (epoch ms) of the day "Plan my day" covers (07:00–23:00): the forecast's first day, or the next one
+    once its 07:00 has passed, so the whole day is inside the forecast. Same rule as sora/decision/schedule.py. */
+export function planDay0(F: Field) {
+  const d = istDayStart(F.times[0]);
+  return Date.parse(F.times[0]) > d + 7 * 3600e3 ? d + 86400e3 : d;
+}
 
 /** "Today 18:00" style label relative to the forecast start. */
 export function relDay(iso: string, refIso: string) {

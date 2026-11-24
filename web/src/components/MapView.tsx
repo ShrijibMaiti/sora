@@ -3,7 +3,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { AQI, PLACES, POLL, UNC, ROUTE, hexGrid, hexPoly, inBbox, recOf, routeToken, type LatLng, type RouteId, type Sample } from '../data/sora';
 import { activeField, cityOf, useSora } from '../state/store';
-import { sampleField } from '../lib/field';
+import { covFloor, sampleField } from '../lib/field';
 import type { Layout } from '../lib/layout';
 import { Icon, flameSvg } from './Icon';
 
@@ -67,9 +67,9 @@ export function MapView({ L: lay }: { L: Layout }) {
     if (!G) return;
     G.field.clearLayers(); G.stations.clearLayers(); G.fires.clearLayers(); G.hexes = [];
     if (!pm) return;
-    const r = 0.0105;
+    const r = 0.0105, masked = covFloor(pm) > 0;
     G.hexes = hexGrid(cityOf(pm.city).bbox, r).map(([la, lo]) => ({
-      la, lo, cov: sampleField(pm, 0, la, lo).coverage,
+      la, lo, cov: masked ? sampleField(pm, 0, la, lo).coverage : 1,
       poly: L.polygon(hexPoly(la, lo, r, 0.86), { renderer: G.renderer, stroke: false, fillOpacity: 0, interactive: false }).addTo(G.field),
     }));
     pm.stations.forEach((s) => L.marker([s.lat, s.lon], {

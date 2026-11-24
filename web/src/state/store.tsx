@@ -6,8 +6,8 @@ import {
 } from '../data/sora';
 import { ApiError, api, type DayView } from '../api/client';
 import type { ApiEvent, Change, CounterfactualResponse, DayRequest, Field, PlanRequest } from '../api/types';
-import { fieldSeries } from '../lib/field';
-import { HOUR_MS, hourIndex, istDayStart, istHHMM, istTimeOnOrAfter } from '../lib/time';
+import { fieldSeries, planDay0 } from '../lib/field';
+import { HOUR_MS, hourIndex, istHHMM, istTimeOnOrAfter } from '../lib/time';
 
 export type Tab = 'live' | 'trip' | 'day' | 'what' | 'ins';
 export type Demo = 'none' | 'loading' | 'offline' | 'degraded' | 'unreliable' | 'nofeasible' | 'notbuilt';
@@ -142,10 +142,10 @@ function questionChanges(F: Field): Change[] {
   ];
 }
 
-/** POST /api/day body from the Plan my day editor, on the forecast's first IST day. */
+/** POST /api/day body from the Plan my day editor, for the day planDay0 picks. */
 function dayRequest(st: State, F: Field): DayRequest {
   const P = (k: string) => { const p = PLACES.find((x) => x.k === k)!; return { label: p.name, lat: p.ll[0], lon: p.ll[1] }; };
-  const day0 = istDayStart(F.times[0]), at = (t: string) => (t ? new Date(day0 + toMin(t) * 60e3).toISOString() : undefined);
+  const day0 = planDay0(F), at = (t: string) => (t ? new Date(day0 + toMin(t) * 60e3).toISOString() : undefined);
   return {
     city: st.city, mode: st.prefs.mode, max_extra_min: st.prefs.extra,
     stops: st.dayStops.map((s) => ({

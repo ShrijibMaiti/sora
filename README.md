@@ -153,7 +153,18 @@ sora/
 
 ## Status
 
-- **Backend/ML:** structure only; files are empty placeholders except the first data modules
-  (`config.py`, `geo.py`, `data/openmeteo.py`, `data/openaq.py`, `data/qc.py`, `data/osm.py`) and `pyproject.toml`.
-- **Frontend (`web/`):** landing page and app UI built, running on mock data with hardcoded values;
-  not yet connected to the backend. `cd web; npm install; npm run dev`.
+- **Backend/ML:** mostly placeholders. Working: data modules (`data/openmeteo.py`, `openaq.py`, `qc.py`, `osm.py`),
+  the API (`api/main.py`, `routes/field.py`, `routes/events.py`) serving `/api/cities`, a live CAMS PM2.5 field for Delhi
+  (`field/forecast.py`, degradation L5), forecast-driven alerts (`events/detect.py`), and the planner
+  (`decision/routing.py` trip, `schedule.py` day, `counterfactual.py` what-if) on the OSM road graph
+  (`representation/road_graph.py`, downloaded once to `data_cache/`, ~40 s) with paired confidence on shared samples
+  (`uncertainty/ensemble.py`, `decision/confidence.py`).
+- **Frontend (`web/`):** landing page and app UI built; mock backend by default, real backend with `VITE_USE_MOCK=false`.
+
+```
+pip install -e ".[dev]"
+uvicorn sora.api.main:app --reload            # API on :8000 (first /api/field call fetches CAMS, ~10 s)
+cd web; npm install
+$env:VITE_USE_MOCK='false'; npm run dev       # app on :5173, /api forwarded to :8000
+pytest                                        # API tests, no network
+```

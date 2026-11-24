@@ -30,6 +30,7 @@ the frontend mock (`web/src/api/mock.ts`) implements exactly this contract.
 | `unavailable` | 404 | Pollutant not forecast for this city (MVP forecasts PM2.5 only) |
 | `unknown_city` | 404 | City key not recognised |
 | `beyond_horizon` | 400 | Requested times fall outside the 0–72 h forecast |
+| `upstream` | 503 | Forecast inputs (CAMS / met) unreachable and no field from the last 3 h to fall back on |
 
 ## GET /api/cities
 
@@ -45,7 +46,15 @@ City[] = {
 
 ## GET /api/field?city={key}&pollutant={pm25|pm10|no2|o3|so2|co}
 
-Hourly forecast field for one pollutant, 0–72 h (spec §18). Errors: `not_built`, `unavailable`, `unknown_city`.
+Hourly forecast field for one pollutant, 0–72 h (spec §18). Errors: `not_built`, `unavailable`, `unknown_city`, `upstream`.
+
+Backend status: PM2.5 only, CAMS background on a 12×12 grid with a fixed log-normal error band (`degradation: "L5"`),
+no stations yet (`stations: []`, `coverage` all 0: the UI then treats every cell as having data).
+
+Planner backend (`sora/decision/`): routes on the OSM graph for `route_bbox`, typical speeds by road class with a rush-hour
+factor, fixed microenvironment and near-road priors (spec §21.4), and 128 shared field samples for every band and
+`p_better`. Every dose (plan options and what-if) covers the same window, from `earliest` to the latest possible
+arrival, including indoor time at both ends.
 
 ```ts
 {

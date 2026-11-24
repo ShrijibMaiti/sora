@@ -178,7 +178,9 @@ export async function day(q: DayRequest): Promise<DayResponse> {
   await delay(500);
   cityOrThrow(q.city);
   if (q.stops.length < 2) throw new ApiError(400, 'invalid', 'A day needs at least two stops.');
-  const day0 = istDayStart(new Date(t0ms()).toISOString()), n = q.stops.length;
+  /* the day the request's times fall on (the app sends tomorrow once today's 07:00 has passed) */
+  const ref = q.stops.flatMap((s) => [s.arrive_after, s.leave_before]).find(Boolean) ?? new Date(t0ms()).toISOString();
+  const day0 = istDayStart(ref), n = q.stops.length;
   const base = simulate(q.stops, q.mode, day0, Array(n).fill(0), Array(n).fill(0));
   if (!base.ok) throw new ApiError(400, 'no_feasible', 'The stops do not fit their time windows. Shorten a stay or widen a window.');
 
