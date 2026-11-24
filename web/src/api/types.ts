@@ -57,6 +57,17 @@ export type Change =
   | { kind: 'stay_indoors'; start: ISO; end: ISO };
 export type CounterfactualResponse = { delta_pct: Band; p_better: number; verdict: string; reason: string };
 
+export type WirePlace = { key: string; name: string; sub: string; lat: number; lon: number; building: BuildingKey | null };
+/** The trip and day a city opens with (backend config.EXAMPLES). Times are IST "HH:MM". */
+export type Example = {
+  trip: { origin: string; dest: string; mode: ModeKey; dep: string; origin_building: BuildingKey; dest_building: BuildingKey };
+  day: {
+    name: string; place: string; alt?: string; alt_building?: BuildingKey; after?: string; before?: string; duration_min?: number;
+    building: BuildingKey; activity: 'rest' | 'light' | 'moderate' | 'high';
+  }[];
+};
+export type PlacesResponse = { places: WirePlace[]; example: Example | null };
+
 export type ApiEvent = {
   kind: string; title: string; body: string; start: ISO; end: ISO | null;
   severity: 'warning' | 'info' | 'success'; probability: number;

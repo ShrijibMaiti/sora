@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
-import { BUILDINGS, ME, PLACES, dayBars, hhmm, type BuildingKey, type DaySeg } from '../../data/sora';
-import { NEW_STOP, activeField, useSora, type DayStop } from '../../state/store';
+import { BUILDINGS, ME, dayBars, hhmm, type BuildingKey, type DaySeg } from '../../data/sora';
+import { NEW_STOP, activeField, placeOf, useSora, type DayStop } from '../../state/store';
 import { istDay } from '../../lib/time';
 import { planDay0 } from '../../lib/field';
 import { Select } from '../Chrome';
@@ -8,7 +8,6 @@ import { Icon } from '../Icon';
 import { Disclaimer, Dl, PanelHeader, SubTabs } from './shared';
 
 const fmt = (n: number) => n.toLocaleString('en-IN');
-const PLACE_OPTS = PLACES.filter((p) => p.k !== 'noida').map((p) => ({ k: p.k, label: p.name }));
 const ACTIVITY: { k: DayStop['activity']; label: string }[] = [{ k: 'rest', label: 'Resting' }, { k: 'light', label: 'Light: sitting, walking' }, { k: 'moderate', label: 'Moderate' }, { k: 'high', label: 'Exercise' }];
 const COUNT = ['Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten'];
 const lbl = (t: string) => <span className="eyebrow">{t}</span>;
@@ -17,17 +16,22 @@ function StopEditor({ i, onRemove }: { i: number; onRemove: () => void }) {
   const { st, set } = useSora();
   const s = st.dayStops[i], n = st.dayStops.length, first = i === 0, last = i === n - 1;
   const up = (p: Partial<DayStop>) => set((x) => ({ dayStops: x.dayStops.map((d, j) => (j === i ? { ...d, ...p } : d)) }));
+  /* the city's places (GET /api/places, plus any picked from search); a place's known building type fills the field */
+  const PLACE_OPTS = [...(s.place && !st.places.some((p) => p.k === s.place) ? [{ k: s.place, label: placeOf(s.place)?.name ?? 'Choose a place' }] : []),
+    ...st.places.map((p) => ({ k: p.k, label: p.name }))];
+  const pickPlace = (v: string) => up({ place: v, ...(placeOf(v)?.building ? { bld: placeOf(v)!.building } : {}) });
+  const pickAlt = (v: string) => up({ alt: v, ...(placeOf(v)?.building ? { altBld: placeOf(v)!.building } : {}) });
   return (
     <div className="stack g20" style={{ padding: '4px 0 24px' }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(100%,160px),1fr))', gap: '20px 16px' }}>
         <label className="field">{lbl('Name')}<div className="input-box"><input value={s.name} maxLength={32} onChange={(e) => up({ name: e.target.value })} /></div></label>
-        <label className="field">{lbl('Place')}<Select className="sel-lg" chevClass="lg" value={s.place} options={PLACE_OPTS} label="Place" onChange={(v) => up({ place: v })} /></label>
+        <label className="field">{lbl('Place')}<Select className="sel-lg" chevClass="lg" value={s.place} options={PLACE_OPTS} label="Place" onChange={pickPlace} /></label>
         {!first && <label className="field">{lbl('Arrive after · optional')}<div className="input-box"><Icon name="clock" size={15} /><input type="time" value={s.after} onChange={(e) => up({ after: e.target.value })} /><span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-tertiary)' }}>IST</span></div></label>}
         {!last && <label className="field">{lbl(first ? 'Leave at' : 'Leave by · optional')}<div className="input-box"><Icon name="flag" size={15} /><input type="time" value={s.before} onChange={(e) => up({ before: e.target.value })} /><span style={{ fontSize: 'var(--fs-micro)', color: 'var(--text-tertiary)' }}>IST</span></div></label>}
         {!first && !last && <label className="field">{lbl('Stay')}<div className="input-box"><Icon name="timer" size={15} /><input type="number" min={15} max={720} step={5} value={s.dur} onChange={(e) => up({ dur: Math.max(15, Math.min(720, +e.target.value || 15)) })} /><span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>min</span></div></label>}
         <label className="field">{lbl('Building')}<Select<BuildingKey> className="sel-lg" chevClass="lg" value={s.bld} options={BUILDINGS} label="Building" onChange={(v) => up({ bld: v })} /></label>
         {!first && !last && <label className="field">{lbl('Activity')}<Select<DayStop['activity']> className="sel-lg" chevClass="lg" value={s.activity} options={ACTIVITY} label="Activity" onChange={(v) => up({ activity: v })} /></label>}
-        {!first && !last && <label className="field">{lbl('Alternative place · optional')}<Select className="sel-lg" chevClass="lg" value={s.alt} options={[{ k: '', label: 'None' }, ...PLACE_OPTS.filter((p) => p.k !== s.place)]} label="Alternative place" onChange={(v) => up({ alt: v })} /></label>}
+        {!first && !last && <label className="field">{lbl('Alternative place · optional')}<Select className="sel-lg" chevClass="lg" value={s.alt} options={[{ k: '', label: 'None' }, ...PLACE_OPTS.filter((p) => p.k !== s.place)]} label="Alternative place" onChange={pickAlt} /></label>}
         {!first && !last && s.alt && <label className="field">{lbl('Alternative building')}<Select<BuildingKey> className="sel-lg" chevClass="lg" value={s.altBld} options={BUILDINGS} label="Alternative building" onChange={(v) => up({ altBld: v })} /></label>}
       </div>
       {!first && !last && <button className="btn-ghost-sm" style={{ alignSelf: 'flex-start', display: 'inline-flex', gap: 8, alignItems: 'center' }} onClick={onRemove}><Icon name="trash-2" size={14} />Remove stop</button>}
@@ -58,9 +62,9 @@ export function DayPanel() {
   const T = DAY.total;
   const cur = st.dayView === 'opt' ? bn : bo;
   const optimize = async () => { setSent(JSON.stringify(st.dayStops)); setOpen(null); await loadDay(); set((s) => ({ sub: { ...s.sub, day: 'result' } })); };
-  const addStop = () => { set((s) => ({ dayStops: [...s.dayStops.slice(0, -1), { ...NEW_STOP }, s.dayStops[s.dayStops.length - 1]] })); setOpen(n - 1); };
+  const addStop = () => { set((s) => ({ dayStops: [...s.dayStops.slice(0, -1), { ...NEW_STOP, place: s.places[0]?.k ?? '' }, s.dayStops[s.dayStops.length - 1]] })); setOpen(n - 1); };
   const removeStop = (i: number) => { set((s) => ({ dayStops: s.dayStops.filter((_, j) => j !== i) })); setOpen(null); };
-  const placeName = (k: string) => PLACES.find((p) => p.k === k)?.name ?? '';
+  const placeName = (k: string) => placeOf(k)?.name ?? '';
   const mono = { fontFamily: 'var(--font-mono)' };
 
   return (

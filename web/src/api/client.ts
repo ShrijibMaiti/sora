@@ -1,11 +1,11 @@
 /* Typed client for the Sora API (docs/api_contract.md). Production builds call the real /api; `npm run dev` uses the
    in-browser mock. Override either way with VITE_USE_MOCK=true|false (Vite forwards /api to :8000 in dev and preview). */
-import type { DaySeg, PlanOk, PollKey, TripOption } from '../data/sora';
+import type { DaySeg, Place, PlanOk, PollKey, TripOption } from '../data/sora';
 import { istHHMM, istMinutes } from '../lib/time';
 import * as mock from './mock';
 import {
-  ApiError, type ApiEvent, type Change, type City, type CounterfactualResponse, type DayRequest, type DayResponse, type Field,
-  type PlanRequest, type PlanResponse, type Segment, type WireOption,
+  ApiError, type ApiEvent, type Change, type City, type CounterfactualResponse, type DayRequest, type DayResponse, type Example, type Field,
+  type PlacesResponse, type PlanRequest, type PlanResponse, type Segment, type WireOption, type WirePlace,
 } from './types';
 
 const mockEnv = import.meta.env.VITE_USE_MOCK;
@@ -34,10 +34,13 @@ const remote = {
   day: (body: DayRequest) => http<DayResponse>('/day', body),
   counterfactual: (body: { plan: PlanRequest; change: Change }) => http<CounterfactualResponse>('/counterfactual', body),
   events: (city: string) => http<ApiEvent[]>(`/events?city=${q(city)}`),
+  places: (city: string) => http<PlacesResponse>(`/places?city=${q(city)}`),
+  search: (city: string, text: string) => http<WirePlace[]>(`/search?city=${q(city)}&q=${q(text)}`),
 };
 const raw: typeof remote = USE_MOCK ? mock : remote;
 
 /* ---------- wire → view (screens show IST wall-clock times) ---------- */
+const place = (p: WirePlace): Place => ({ k: p.key, name: p.name, sub: p.sub, ll: [p.lat, p.lon], building: p.building ?? undefined });
 const opt = (o: WireOption): TripOption => ({ ...o, departure: istHHMM(o.departure), departure_min: istMinutes(o.departure), departure_iso: o.departure });
 const seg = (s: Segment): DaySeg => ({ me: s.me, a: istMinutes(s.start), b: istMinutes(s.end), dose: s.dose, label: s.label });
 
@@ -53,6 +56,11 @@ export const api = {
   field: raw.field,
   events: raw.events,
   counterfactual: raw.counterfactual,
+  async places(city: string): Promise<{ places: Place[]; example: Example | null }> {
+    const r = await raw.places(city);
+    return { places: r.places.map(place), example: r.example };
+  },
+  search: async (city: string, text: string) => (await raw.search(city, text)).map(place),
   async plan(body: PlanRequest): Promise<PlanOk> {
     const r = await raw.plan(body);
     return { ...r, baseline: opt(r.baseline), options: r.options.map(opt), window: { start: istHHMM(r.window.start), end: istHHMM(r.window.end) } };

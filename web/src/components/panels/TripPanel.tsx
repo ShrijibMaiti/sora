@@ -1,12 +1,12 @@
 import { useEffect, type FormEvent } from 'react';
-import { BUILDINGS, MODES, PLACES, ROUTE, pareto, recOf, departed, routeColor, sgn, segs, toMin, hhmm, type BuildingKey, type PlanOk, type TripOption } from '../../data/sora';
-import { useSora } from '../../state/store';
-import { istDayStart } from '../../lib/time';
+import { BUILDINGS, MODES, ROUTE, pareto, recOf, departed, routeColor, sgn, segs, toMin, hhmm, type BuildingKey, type PlanOk, type TripOption } from '../../data/sora';
+import { placeOf, useSora } from '../../state/store';
+import { istDayStart, istMinutes } from '../../lib/time';
 import { Select } from '../Chrome';
 import { Icon } from '../Icon';
 import { Disclaimer, Dl, Meter, PanelHeader, SubTabs } from './shared';
 
-export const placeName = (k: string) => (k === 'custom_here' ? 'Your location' : PLACES.find((p) => p.k === k)?.name || 'Dropped pin');
+export const placeName = (k: string) => (k === 'custom_here' ? 'Your location' : placeOf(k)?.name || (k.startsWith('custom_') ? 'Dropped pin' : 'Choose a place'));
 export const modeLabel = (k: string) => MODES.find((m) => m.k === k)?.label || '';
 
 export function TripPanel() {
@@ -42,13 +42,18 @@ export function TripPanel() {
 
       {res?.error && (() => {
         /* keyed by API error code (docs/api_contract.md); the server's message is the body text */
-        const example = () => setTrip({ origin: 'saket', dest: 'cp' }, true);
+        /* recovery actions come from the city's example trip (GET /api/places) and the clock, not fixed places */
+        const ex = st.example?.trip;
+        const example = () => ex && setTrip({ origin: ex.origin, dest: ex.dest }, true);
+        const exLabel = ex ? `Use ${placeName(ex.origin)} → ${placeName(ex.dest)}` : 'Edit trip';
+        const fix = ex ? example : () => set({ editTrip: true });
+        const now = Math.ceil(istMinutes(new Date().toISOString()) / 5) * 5 + 5;
         const E = ({
           no_feasible: ['clock-alert', 'No departure meets your arrival time', 'Clear arrival time', () => { set({ demo: 'none' }); setTrip({ latest: '' }, true); }],
-          outside: ['map-pin-off', 'Point outside the routable area', 'Use Saket → Connaught Place', example],
-          no_route: ['route', 'No route for this mode', 'Use Saket → Connaught Place', example],
-          missing: ['map-pin', 'Choose a start and destination', 'Use an example', example],
-          beyond_horizon: ['clock-alert', 'Outside the forecast window', 'Leave at 18:15', () => setTrip({ dep: '18:15' }, true)],
+          outside: ['map-pin-off', 'Point outside the routable area', exLabel, fix],
+          no_route: ['route', 'No route for this mode', exLabel, fix],
+          missing: ['map-pin', 'Choose a start and destination', ex ? 'Use an example' : 'Edit trip', fix],
+          beyond_horizon: ['clock-alert', 'Outside the forecast window', `Leave at ${hhmm(now)}`, () => setTrip({ dep: hhmm(now) }, true)],
         } as Record<string, [string, string, string, () => void]>)[res.error] ?? ['circle-slash', 'This trip could not be planned', 'Try again', runPlan];
         const body = res.message || 'Search, pick from the list, or click the map.';
         return (
@@ -69,7 +74,7 @@ export function TripPanel() {
 function TripForm({ onSubmit }: { onSubmit: (e: FormEvent) => void }) {
   const { st, set, setTrip } = useSora();
   const { trip } = st;
-  const placeOpts = [...PLACES, ...Object.keys(st.custom).map((k) => ({ k: 'custom_' + k, name: k === 'here' ? 'Your location' : `Dropped pin (${st.custom[k][0].toFixed(3)}, ${st.custom[k][1].toFixed(3)})` }))];
+  const placeOpts = [...st.places, ...Object.keys(st.custom).map((k) => ({ k: 'custom_' + k, name: k === 'here' ? 'Your location' : `Dropped pin (${st.custom[k][0].toFixed(3)}, ${st.custom[k][1].toFixed(3)})` }))];
   const ends = [['origin', 'Start', '50%', 'var(--route-halo)'], ['dest', 'Destination', '2px', 'var(--text-primary)']] as const;
   const lbl = (t: string) => <span className="eyebrow">{t}</span>;
   return (
@@ -84,8 +89,10 @@ function TripForm({ onSubmit }: { onSubmit: (e: FormEvent) => void }) {
                 <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 12, height: 52, padding: '0 6px 0 16px', borderRadius: 'var(--radius-md)', background: 'var(--surface-sunken)', border: `1px solid ${picking ? 'var(--brand)' : 'var(--border-default)'}` }}>
                   <span style={{ width: 10, height: 10, flex: 'none', borderRadius: r, border: '2px solid var(--text-primary)', background: fill }} />
                   <div className="sel-wrap" style={{ flex: 1, minWidth: 0 }}>
-                    <select value={trip[k]} aria-label={l} onChange={(e) => setTrip({ [k]: e.target.value }, true)}
+                    <select value={trip[k]} aria-label={l}
+                      onChange={(e) => { const b = placeOf(e.target.value)?.building; setTrip({ [k]: e.target.value, ...(b ? { [k === 'origin' ? 'ob' : 'db']: b } : {}) }, true); }}
                       style={{ appearance: 'none', WebkitAppearance: 'none', width: '100%', height: 48, border: 0, background: 'transparent', fontSize: 'var(--fs-body)', paddingRight: 20, textOverflow: 'ellipsis' }}>
+                      {!placeOpts.some((o) => o.k === trip[k]) && <option value={trip[k]} disabled>{placeName(trip[k])}</option>}
                       {placeOpts.map((o) => <option key={o.k} value={o.k}>{o.name}</option>)}
                     </select>
                     <span className="chev" style={{ right: 0 }}><Icon name="chevron-down" size={14} /></span>

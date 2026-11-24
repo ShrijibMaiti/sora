@@ -52,7 +52,7 @@ with sync_playwright() as p:
             pg.screenshot(path=str(SHOTS / f"{tab.replace(' ', '').lower()}.png"))
     b.close()
 
-for name in ("cities", "field", "events", "plan", "day", "counterfactual"):
+for name in ("cities", "places", "field", "events", "plan", "day", "counterfactual"):
     got = [s for m, n, s in calls if n == name and not (name == "field" and s == 404)]  # other pollutants: 404 unavailable
     check(bool(got) and all(s == 200 for s in got), f"/api/{name}: {sorted(set(got)) or 'not called'}")
 check(not [x for x in problems if x.startswith("page error")], "no page errors")

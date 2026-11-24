@@ -1,5 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AQI, CITIES, DAY, ME, MODES, PATHS, ROUTE, UNC, cityMean, hhmm, plan, routeColor, sample, segs, sgn, type LatLng, type ModeKey, type PlanOk } from '../data/sora';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AQI, CITIES, DAY, ME, MODES, PATHS, ROUTE, UNC, cityMean, hhmm, plan, routeColor, sample, segs, sgn, type City, type LatLng, type ModeKey, type Place, type PlanOk } from '../data/sora';
+import { USE_MOCK, api } from '../api/client';
+import type { Example } from '../api/types';
+import { istTimeOnOrAfter } from '../lib/time';
 import { Icon } from '../components/Icon';
 import './landing.css';
 
@@ -129,6 +132,10 @@ export default function Landing() {
   const [city, setCity] = useState('delhi');
   const [mode, setMode] = useState<ModeKey>('car_ac');
   const [dep, setDep] = useState(1095);
+  const [cities, setCities] = useState<City[]>(CITIES); // static list is the fail-safe until GET /api/cities answers
+  const [live, setLive] = useState<PlanOk | null>(null);
+  const placesCache = useRef<Record<string, { places: Place[]; example: Example | null }>>({});
+  useEffect(() => { api.cities().then(setCities, () => {}); }, []);
 
   useEffect(() => {
     document.title = "Sora — The air map isn't your exposure";
@@ -143,11 +150,36 @@ export default function Landing() {
   const heroCols = stack ? 'minmax(0,1fr)' : 'minmax(0,1fr) minmax(0,1.05fr)';
   const twoCols = stack ? 'minmax(0,1fr)' : 'minmax(0,1fr) minmax(0,1fr)';
   const leave = hhmm(dep);
-  const c = CITIES.find((x) => x.key === city)!;
+  const c = cities.find((x) => x.key === city) ?? cities[0];
+
+  /* the preview asks the real API for the city's example trip (GET /api/places, POST /api/plan); the in-browser
+     model is only the fail-safe when the API can't be reached */
+  useEffect(() => {
+    if (!c.built) { setLive(null); return; }
+    let on = true;
+    const id = setTimeout(async () => {
+      try {
+        const pl = placesCache.current[city] ?? (placesCache.current[city] = await api.places(city));
+        const ex = pl.example?.trip, ll = (k: string) => pl.places.find((p) => p.k === k)?.ll;
+        const o = ex && ll(ex.origin), d = ex && ll(ex.dest);
+        if (!ex || !o || !d) throw new Error('no example trip');
+        const depIso = istTimeOnOrAfter(leave, new Date().toISOString()), ms = Date.parse(depIso);
+        const r = await api.plan({
+          city, origin: o, dest: d, mode, planned_departure: depIso, earliest: new Date(Math.max(ms - 90 * 60e3, Date.now())).toISOString(),
+          latest_departure: new Date(ms + 90 * 60e3).toISOString(), latest_arrival: null, max_extra_min: 15,
+          origin_building: ex.origin_building, dest_building: ex.dest_building,
+        });
+        if (on) setLive(r);
+      } catch {
+        if (on) setLive(null);
+      }
+    }, 250);
+    return () => { on = false; clearTimeout(id); };
+  }, [city, mode, leave, c.built]);
 
   const out = useMemo(() => {
     if (!c.built) return null;
-    const res = plan({ mode, planned_departure: leave, dest_building: 'ac_sealed' }) as PlanOk;
+    const res = live ?? (plan({ mode, planned_departure: leave, dest_building: 'ac_sealed' }) as PlanOk);
     const best = res.reliable ? res.options[1] : res.options.reduce((a, b) => ((b.p_better ?? 0) > (a.p_better ?? 0) ? b : a));
     const p = best.p_better ?? 0, rel = p >= 0.7;
     return {
@@ -156,7 +188,7 @@ export default function Landing() {
       extra: (best.extra_min >= 0 ? '+' : '−') + Math.abs(best.extra_min) + ' min', segs: segs(p, rel),
       conf: `${Math.round(p * 100)}% chance it's lower than leaving at ${leave}` + (rel ? '' : ' — not reliable'), why: res.explanation[0],
     };
-  }, [c.built, mode, leave]);
+  }, [c.built, mode, leave, live]);
 
   const lc = (i: number) => (layer === i ? 'var(--text-primary)' : 'var(--text-tertiary)');
   const O = OPS[op];
@@ -307,13 +339,13 @@ export default function Landing() {
 
             <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
               <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border-default)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 'var(--fs-body)', fontWeight: 500 }}>Try the evening commute</span><span style={{ marginLeft: 'auto', fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>Runs in your browser</span>
+                <span style={{ fontSize: 'var(--fs-body)', fontWeight: 500 }}>Try the evening commute</span><span style={{ marginLeft: 'auto', fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>{!live ? 'Illustrative model' : USE_MOCK ? 'Demo data' : 'Live forecast'}</span>
               </div>
               <div style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 20, flex: 1 }}>
                 <fieldset style={{ border: 0, margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <legend style={{ fontSize: 'var(--fs-small)', fontWeight: 500, marginBottom: 10, padding: 0 }}>Select a city</legend>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', gap: 8 }}>
-                    {CITIES.map((x) => (
+                    {cities.map((x) => (
                       <button key={x.key} className="lp-chip" aria-pressed={city === x.key} onClick={() => setCity(x.key)}
                         style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, padding: '10px 12px', minHeight: 56, borderRadius: 'var(--radius-md)', textAlign: 'left' }}>
                         <span style={{ fontSize: 'var(--fs-small)', color: city === x.key ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{x.name}</span>
@@ -504,7 +536,7 @@ export default function Landing() {
             <p className="lp-lede" style={{ maxWidth: 540 }}>The same physics under different winds, coastlines and seasons. Sora's model is trained on three of them and checked on the fourth, a city it has never seen.</p>
           </div>
           <ul style={{ listStyle: 'none', margin: 0, padding: 0, borderTop: '1px solid var(--border-default)' }}>
-            {CITIES.map((x) => (
+            {cities.map((x) => (
               <li key={x.key} className="lp-city" style={{ gridTemplateColumns: stack ? 'minmax(0,1fr)' : 'minmax(0,0.8fr) minmax(0,1.5fr) 9.5rem' }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
                   <h3 style={{ margin: 0, fontSize: 'clamp(24px,2.4vw,32px)', fontWeight: 400, letterSpacing: '-.025em' }}>{x.name}</h3>

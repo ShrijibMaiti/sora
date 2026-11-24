@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { sgn, segs } from '../../data/sora';
-import { QUESTIONS, useSora } from '../../state/store';
+import { useSora } from '../../state/store';
 import { Icon } from '../Icon';
 import { Disclaimer, Meter, PanelHeader } from './shared';
 import { modeLabel, placeName } from './TripPanel';
@@ -20,7 +20,7 @@ export function WhatIfPanel() {
       <section aria-label="Questions" className="sec">
         <span className="eyebrow">Pick a question</span>
         <div role="group" aria-label="Questions" style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          {QUESTIONS.map((w, i) => {
+          {st.whatif.map((w, i) => {
             const on = st.wi.includes(i);
             return (
               <button key={w.q} className="wi-chip" aria-pressed={on} onClick={() => set((s) => ({ wi: on ? s.wi.filter((x) => x !== i) : [i, ...s.wi] }))}>
@@ -30,11 +30,12 @@ export function WhatIfPanel() {
           })}
         </div>
       </section>
-      {st.wi.map((i) => {
-        const a = st.whatif[i], q = QUESTIONS[i];
+      {st.wi.filter((i) => i < st.whatif.length).map((i) => {
+        const { q, a } = st.whatif[i];
         if (!a || a === 'error')
-          return <p key={i} className="lede ruled" aria-busy={!a}>{q.q}: {a ? "couldn't get an answer — try again later." : 'working it out…'}</p>;
-        const w = { q: q.q, d: a.delta_pct, p: a.p_better, verdict: a.verdict, reason: a.reason }, rel = w.p >= 0.7, worse = w.d.median > 0;
+          return <p key={i} className="lede ruled" aria-busy={!a}>{q}: {a ? "couldn't get an answer — try again later." : 'working it out…'}</p>;
+        /* "Likely helps" already requires P ≥ 0.7 and a range clear of zero (server, spec §31.7) */
+        const w = { q, d: a.delta_pct, p: a.p_better, verdict: a.verdict, reason: a.reason }, rel = a.verdict === 'Likely helps', worse = w.d.median > 0;
         const pct = Math.round(w.p * 100) + '%';
         return (
           <article key={i} className="sec" aria-label={`${w.q}: ${w.verdict}, dose change ${sgn(w.d.median)}% (${w.d.p05} to ${w.d.p95}), ${pct} chance it helps`}>

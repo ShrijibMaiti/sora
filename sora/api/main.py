@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import config, pipeline
 from ..field import forecast
-from .routes import events, field, plan
+from .routes import events, field, places, plan
 
 logging.basicConfig(level=os.environ.get("SORA_LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logging.getLogger("httpx").setLevel(logging.WARNING)  # its INFO lines carry full URLs, and the FIRMS key is in the path
@@ -35,7 +35,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Sora API", version="1", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=1000)  # /api/field is ~180 kB of JSON, ~30 kB gzipped
-for r in (field.router, events.router, plan.router):
+for r in (field.router, events.router, plan.router, places.router):
     app.include_router(r, prefix="/api")
 
 

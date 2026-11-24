@@ -1,8 +1,8 @@
 import { useEffect, useReducer, useRef } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { AQI, PLACES, POLL, UNC, ROUTE, hexGrid, hexPoly, inBbox, recOf, routeToken, type LatLng, type RouteId, type Sample } from '../data/sora';
-import { activeField, cityOf, useSora } from '../state/store';
+import { AQI, POLL, UNC, ROUTE, hexGrid, hexPoly, inBbox, recOf, routeToken, type LatLng, type RouteId, type Sample } from '../data/sora';
+import { activeField, cityOf, placeOf, useSora } from '../state/store';
 import { covFloor, sampleField } from '../lib/field';
 import type { Layout } from '../lib/layout';
 import { Icon, flameSvg } from './Icon';
@@ -126,6 +126,7 @@ export function MapView({ L: lay }: { L: Layout }) {
 
   /* routes + stops */
   const res = st.res;
+  const dayKey = st.dayView + JSON.stringify(st.dayStops.map((s) => [s.name, s.place, s.alt])) + (st.day?.stops.map((s) => s.chosen).join() ?? '');
   const resKey = res ? (res.error ? res.error : JSON.stringify(res.baseline.path[0]) + res.options[0].dose.median + res.options.map((o) => o.path.length).join() + res.reliable + res.recommended) : '';
   useEffect(() => {
     const map = mapRef.current, G = g.current;
@@ -162,12 +163,22 @@ export function MapView({ L: lay }: { L: Layout }) {
       }
     }
     if (st.tab === 'day') {
-      const P = Object.fromEntries(PLACES.map((p) => [p.k, p.ll])) as Record<string, LatLng>;
-      ([['lajpat', 'H'], ['iitd', '1'], ['greenpark', '2'], ['khan', '3']] as const).forEach(([k, l]) => pin(P[k], 'stop', l).addTo(G.stops));
-      L.polyline([P.lajpat, P.iitd, P.greenpark, P.khan, P.lajpat], { color: css('--text-primary'), weight: 3, opacity: 0.8, dashArray: '1 7', lineCap: 'round', interactive: false }).addTo(G.routes);
+      /* the user's stops, at the place the optimized day uses (its alternative when the optimizer chose it) */
+      const pts: LatLng[] = [], pinned = new Set<string>();
+      let n = 0;
+      st.dayStops.forEach((s, i) => {
+        const alt = placeOf(s.alt), useAlt = !!alt && st.dayView === 'opt' && st.day?.stops[i]?.chosen === alt.name;
+        const k = useAlt ? s.alt : s.place, p = placeOf(k);
+        if (!p) return;
+        pts.push(p.ll);
+        if (pinned.has(k)) return;
+        pinned.add(k);
+        pin(p.ll, 'stop', /^home$/i.test(s.name.trim()) ? 'H' : String(++n)).bindTooltip(`${s.name} · ${p.name}`).addTo(G.stops);
+      });
+      if (pts.length > 1) L.polyline(pts, { color: css('--text-primary'), weight: 3, opacity: 0.8, dashArray: '1 7', lineCap: 'round', interactive: false }).addTo(G.routes);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [st.tab, st.sel, st.theme, resKey, mapRef, selectOpt]);
+  }, [st.tab, st.sel, st.theme, resKey, mapRef, selectOpt, dayKey]);
 
   /* city: centre it in the visible map, not under the open panel */
   useEffect(() => {

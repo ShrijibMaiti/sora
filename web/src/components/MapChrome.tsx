@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AQI, BP, DEGRADE, PLACES, POLL, UNC, aqiIndex, cat } from '../data/sora';
+import { AQI, BP, DEGRADE, POLL, UNC, aqiIndex, cat, type Place } from '../data/sora';
+import { api } from '../api/client';
 import { activeField, cityOf, useSora } from '../state/store';
 import { fieldMean, fieldSeries, fieldTime, lastHour, relDay } from '../lib/field';
 import { istHHMM } from '../lib/time';
@@ -8,11 +9,20 @@ import { Icon } from './Icon';
 
 /* ---------- search, city, chips, banner ---------- */
 export function FloatTop({ L }: { L: Layout }) {
-  const { st, set, applyDemo, flyTo, searchElRef, openSearch } = useSora();
+  const { st, set, applyDemo, flyTo, searchElRef, openSearch, addPlace } = useSora();
   const [dataOpen, setDataOpen] = useState(false);
   const city = cityOf(st.city);
   const q = st.searchQ.trim().toLowerCase();
-  const results = q ? PLACES.filter((p) => (p.name + ' ' + p.sub).toLowerCase().includes(q)) : PLACES.slice(0, 5);
+  /* GET /api/search (OSM names, streets, the city's places) after a short pause; the city's own places match instantly
+     meanwhile and are the fallback if search fails. Answers for an older query are ignored. */
+  const [remote, setRemote] = useState<{ q: string; list: Place[] } | null>(null);
+  useEffect(() => {
+    if (q.length < 2) return;
+    const id = setTimeout(() => api.search(st.city, q).then((list) => setRemote({ q, list }), () => setRemote(null)), 180);
+    return () => clearTimeout(id);
+  }, [q, st.city]);
+  const local = st.places.filter((p) => (p.name + ' ' + p.sub).toLowerCase().includes(q));
+  const results = !q ? st.places.slice(0, 5) : remote?.q === q ? remote.list : local;
   const F = activeField(st), meta = F?.meta;
   const P = POLL.find((p) => p.k === (F?.pollutant ?? st.poll))!;
   const degr = st.demo === 'degraded' ? DEGRADE[5] : st.offline || !meta ? DEGRADE[7] : DEGRADE.find((d) => d.l === meta.degradation) || DEGRADE[7];
@@ -33,7 +43,8 @@ export function FloatTop({ L }: { L: Layout }) {
 
   /* search: combobox with arrow-key navigation over the result options */
   const [active, setActive] = useState(-1);
-  const pick = (p: (typeof PLACES)[number]) => {
+  const pick = (p: Place) => {
+    addPlace(p); // now also selectable in the trip and day editors
     set((s) => ({ searchOpen: false, searchQ: p.name, pt: p.ll, tab: s.tab === 'ins' ? 'live' : s.tab }));
     flyTo(p.ll, 13);
   };
@@ -73,7 +84,7 @@ export function FloatTop({ L }: { L: Layout }) {
             {L.mob && <button className="avatar" onClick={() => set((s) => ({ menuOpen: !s.menuOpen, cityOpen: false }))} aria-label="Settings and profile"><Icon name="user" size={17} /></button>}
           </div>
           {st.searchOpen && (
-            <div id="search-results" role="listbox" aria-label="Places" className="popover" style={{ position: 'absolute', top: 60, left: 0, right: 0, borderRadius: 'var(--radius-xl)', padding: 8, display: 'flex', flexDirection: 'column' }}>
+            <div id="search-results" role="listbox" aria-label="Places" className="popover" style={{ position: 'absolute', top: 60, left: 0, right: 0, zIndex: 1300, borderRadius: 'var(--radius-xl)', padding: 8, display: 'flex', flexDirection: 'column' }}>
               {results.map((p, i) => (
                 <div key={p.k} id={`sr-${p.k}`} role="option" aria-selected={i === active} className="dropdown-row" onMouseDown={(e) => { e.preventDefault(); pick(p); }}
                   onMouseEnter={() => setActive(i)} style={{ cursor: 'pointer', background: i === active ? 'var(--surface-active)' : undefined }}>

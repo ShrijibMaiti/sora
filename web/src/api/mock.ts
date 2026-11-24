@@ -1,13 +1,13 @@
 /* In-browser mock of the Sora API (docs/api_contract.md), built on the deterministic Delhi model in data/sora.ts.
    Same request/response shapes and errors as the real backend, so switching VITE_USE_MOCK off needs no UI change. */
 import {
-  CITIES, EVENTS, FIRES, PATHS, POLL, STATIONS, coverage, hhmm, inBbox, plan as modelPlan, sample,
+  CITIES, DEMO_EXAMPLE, EVENTS, FIRES, PATHS, PLACES, POLL, STATIONS, coverage, hhmm, inBbox, plan as modelPlan, sample,
   type BuildingKey, type LatLng, type MeKey, type ModeKey, type PollKey, type RouteId, type TripOption,
 } from '../data/sora';
 import { HOUR_MS, IST_MS, istDayStart, istHHMM, istMinutes } from '../lib/time';
 import {
   ApiError, type ApiEvent, type Change, type CounterfactualResponse, type DayRequest, type DayResponse, type Field,
-  type Place, type PlanRequest, type PlanResponse, type WireOption,
+  type Place, type PlacesResponse, type PlanRequest, type PlanResponse, type WireOption, type WirePlace,
 } from './types';
 
 const delay = (ms = 250) => new Promise((r) => setTimeout(r, ms));
@@ -262,6 +262,21 @@ export async function counterfactual(q: { plan: PlanRequest; change: Change }): 
     delta_pct: { median: Math.round(d), p05: Math.round(d - 1.645 * sd), p95: Math.round(d + 1.645 * sd) }, p_better: pb,
     verdict: pb >= 0.7 ? 'Likely helps' : pb <= 0.3 ? 'Probably not' : 'Not reliably different', reason,
   };
+}
+
+/* ---------- places: the Delhi demo list (backend: config.PLACES / EXAMPLES and an OSM search index) ---------- */
+const wirePlace = (p: (typeof PLACES)[number]): WirePlace => ({ key: p.k, name: p.name, sub: p.sub, lat: p.ll[0], lon: p.ll[1], building: p.building ?? null });
+export async function places(cityKey: string): Promise<PlacesResponse> {
+  await delay(60);
+  cityOrThrow(cityKey);
+  return { places: PLACES.map(wirePlace), example: DEMO_EXAMPLE };
+}
+
+export async function search(cityKey: string, text: string): Promise<WirePlace[]> {
+  await delay(80);
+  cityOrThrow(cityKey);
+  const q = text.trim().toLowerCase();
+  return PLACES.filter((p) => (p.name + ' ' + p.sub).toLowerCase().includes(q)).map(wirePlace);
 }
 
 export async function events(cityKey: string): Promise<ApiEvent[]> {

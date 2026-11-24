@@ -1,13 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Map as LeafletMap } from 'leaflet';
 import {
-  CITIES, PLACES, PLAN_ERRORS, POLL, WHATIF, toMin,
-  type BuildingKey, type City, type LatLng, type ModeKey, type PlanOk, type PlanResult, type PollKey, type RouteId, type TripOption,
+  CITIES, DEMO_EXAMPLE, PLACES, PLAN_ERRORS, POLL, toMin,
+  type Band, type BuildingKey, type City, type LatLng, type MeKey, type ModeKey, type Place, type PlanOk, type PlanResult, type PollKey, type RouteId, type TripOption,
 } from '../data/sora';
 import { ApiError, api, type DayView } from '../api/client';
-import type { ApiEvent, Change, CounterfactualResponse, DayRequest, Field, PlanRequest } from '../api/types';
+import type { ApiEvent, Change, CounterfactualResponse, DayRequest, Example, Field, PlanRequest } from '../api/types';
 import { fieldSeries, planDay0 } from '../lib/field';
-import { HOUR_MS, hourIndex, istHHMM, istTimeOnOrAfter } from '../lib/time';
+import { HOUR_MS, IST_MS, hourIndex, istHHMM, istTimeOnOrAfter } from '../lib/time';
 
 export type Tab = 'live' | 'trip' | 'day' | 'what' | 'ins';
 export type Demo = 'none' | 'loading' | 'offline' | 'degraded' | 'unreliable' | 'nofeasible' | 'notbuilt';
@@ -17,12 +17,18 @@ export type Trip = {
 };
 export type SubTabs = { live: 'overview' | 'poll' | 'events' | 'data'; trip: 'options' | 'why' | 'chart'; day: 'schedule' | 'result' | 'changes' | 'timeline' };
 export type WhatIfAnswer = CounterfactualResponse | 'error' | null;
+export type WhatIf = { q: string; icon: string; a: WhatIfAnswer };
+/** One planned day kept on this device for Insights (spec §27, §40: never sent anywhere). */
+export type DayRecord = {
+  date: string; city: string; orig: Band; opt: Band; reduction: Band; p: number;
+  byMe: Partial<Record<MeKey, number>>; legs: { from: string; to: string; mode: string; dose: number }[];
+};
 /** One row of the Plan my day editor. Times are IST "HH:MM" ('' = no constraint); dur in minutes (0 = until the next leg). */
 export type DayStop = {
   name: string; place: string; alt: string; altBld: BuildingKey;
   after: string; before: string; dur: number; bld: BuildingKey; activity: 'rest' | 'light' | 'moderate' | 'high';
 };
-export const NEW_STOP: DayStop = { name: 'New stop', place: 'cp', alt: '', altBld: 'naturally_ventilated', after: '', before: '', dur: 60, bld: 'naturally_ventilated', activity: 'light' };
+export const NEW_STOP: DayStop = { name: 'New stop', place: '', alt: '', altBld: 'naturally_ventilated', after: '', before: '', dur: 60, bld: 'naturally_ventilated', activity: 'light' };
 
 export type State = {
   w: number; h: number; booting: boolean; theme: Theme;
@@ -36,8 +42,9 @@ export type State = {
   sub: SubTabs;
   /* API data */
   cities: City[]; reload: number;
+  places: Place[]; example: Example | null; // the city's places (GET /api/places) plus places picked from search
   fields: Partial<Record<PollKey, Field | 'unavailable'>>;
-  events: ApiEvent[]; day: DayView | null; whatif: WhatIfAnswer[];
+  events: ApiEvent[]; day: DayView | null; whatif: WhatIf[];
   dayStops: DayStop[]; toast: string | null;
 };
 
@@ -50,6 +57,26 @@ const store = {
 let CITY_LIST: City[] = CITIES;
 export const cityOf = (key: string) => CITY_LIST.find((c) => c.key === key) || CITY_LIST[0];
 
+/* Places by key: each city's list from GET /api/places plus places picked from search. Seeded with the Delhi demo
+   list so a first paint has names; replaced as soon as the API answers. */
+let PLACE_LIST: Place[] = PLACES;
+export const placeOf = (k: string) => PLACE_LIST.find((p) => p.k === k);
+function registerPlaces(ps: Place[]) {
+  PLACE_LIST = [...PLACE_LIST.filter((p) => !ps.some((x) => x.k === p.k)), ...ps];
+}
+
+/** Trip form and day stops from a city's example (the same shapes the editors use). */
+function fromExample(ex: Example, trip: Trip): { trip: Trip; dayStops: DayStop[] } {
+  const t = ex.trip;
+  return {
+    trip: { ...trip, origin: t.origin, dest: t.dest, mode: t.mode, dep: t.dep, ob: t.origin_building, db: t.dest_building },
+    dayStops: ex.day.map((s) => ({
+      name: s.name, place: s.place, alt: s.alt ?? '', altBld: s.alt_building ?? 'naturally_ventilated', after: s.after ?? '',
+      before: s.before ?? '', dur: s.duration_min ?? 0, bld: s.building, activity: s.activity,
+    })),
+  };
+}
+
 /** Field for the selected pollutant, falling back to PM2.5 while it loads. */
 export function activeField(st: State): Field | null {
   const f = st.fields[st.poll], pm = st.fields.pm25;
@@ -60,27 +87,22 @@ function initialState(): State {
   const theme = (store.get('sora.theme') as Theme) || 'dark';
   const hash = new URLSearchParams(location.hash.slice(1));
   const tabMap: Record<string, Tab> = { trip: 'trip', day: 'day', whatif: 'what', insights: 'ins', live: 'live' };
+  const seed: Trip = { origin: '', dest: '', mode: 'car_ac', dep: '18:15', win: '90', latest: '', maxExtra: 15, ob: 'naturally_ventilated', db: 'ac_sealed' };
   return {
     w: window.innerWidth || 1280, h: window.innerHeight || 800, booting: true, theme,
     tab: tabMap[hash.get('tab') || ''] || 'live', panelOpen: true,
     city: hash.get('city') && CITIES.some((c) => c.key === hash.get('city')) ? hash.get('city')! : 'delhi',
     t: 0, playing: false, poll: 'pm25', unc: false, lay: { stations: true, wind: false, fires: true },
     layersOpen: false, legendOpen: false, pt: null, cityOpen: false, menuOpen: false, searchOpen: false, searchQ: '',
-    trip: { origin: 'saket', dest: 'cp', mode: 'car_ac', dep: '18:15', win: '90', latest: '', maxExtra: 15, ob: 'naturally_ventilated', db: 'ac_sealed' },
+    /* fail-safe first paint: the Delhi example until GET /api/places answers with the city's own */
+    ...fromExample(DEMO_EXAMPLE, seed),
     custom: {}, pick: null, res: null, sel: 'B', planning: false, editTrip: false,
     dayDone: true, dayBusy: false, dayView: 'opt', wi: [1], demo: 'none', offline: false,
     onb: store.get('sora.onboarded') ? -1 : 0,
     sheet: 1, drag: null,
     prefs: { mode: 'car_ac', bld: 'naturally_ventilated', extra: 15 },
     sub: { live: 'overview', trip: 'options', day: 'result' },
-    cities: CITIES, reload: 0, fields: {}, events: [], day: null, whatif: WHATIF.map(() => null),
-    dayStops: [
-      { name: 'Home', place: 'lajpat', alt: '', altBld: 'naturally_ventilated', after: '', before: '08:20', dur: 0, bld: 'naturally_ventilated', activity: 'rest' },
-      { name: 'College', place: 'iitd', alt: '', altBld: 'naturally_ventilated', after: '08:45', before: '', dur: 455, bld: 'naturally_ventilated', activity: 'light' },
-      { name: 'Gym', place: 'hkv', alt: 'greenpark', altBld: 'ac_filtered', after: '', before: '', dur: 75, bld: 'naturally_ventilated', activity: 'high' },
-      { name: 'Restaurant', place: 'khan', alt: '', altBld: 'naturally_ventilated', after: '18:45', before: '', dur: 105, bld: 'ac_sealed', activity: 'light' },
-      { name: 'Home', place: 'lajpat', alt: '', altBld: 'naturally_ventilated', after: '', before: '', dur: 0, bld: 'naturally_ventilated', activity: 'rest' },
-    ],
+    cities: CITIES, reload: 0, places: PLACES, example: null, fields: {}, events: [], day: null, whatif: [],
     toast: null,
   };
 }
@@ -88,7 +110,22 @@ function initialState(): State {
 /* ---------- on-device storage for reminders and "notify me" (spec §40: nothing here leaves the device) ---------- */
 type Reminder = { at: string; title: string; body: string };
 const readList = <T,>(k: string): T[] => { try { return JSON.parse(store.get(k) || '[]') as T[]; } catch { return []; } };
-const DEVICE_KEYS = ['sora.reminders', 'sora.notify'];
+const DEVICE_KEYS = ['sora.reminders', 'sora.notify', 'sora.days'];
+export const readDays = () => readList<DayRecord>('sora.days');
+const KEEP_DAYS = 30;
+
+/** Keep the planned day on this device for Insights; one record per city and date, newest wins. */
+function saveDay(city: string, date: string, d: DayView, stops: DayStop[], mode: ModeKey) {
+  const byMe: DayRecord['byMe'] = {};
+  d.original.forEach((s) => (byMe[s.me] = (byMe[s.me] || 0) + s.dose));
+  const name = (k: string) => placeOf(k)?.name ?? 'Stop';
+  const legs = d.original.filter((_, i) => i % 2 === 1).map((s, i) => ({
+    from: stops[i]?.name || name(stops[i]?.place), to: stops[i + 1]?.name || name(stops[i + 1]?.place), mode, dose: s.dose,
+  }));
+  const rec: DayRecord = { date, city, orig: d.total.orig, opt: d.total.opt, reduction: d.total.red, p: d.total.p, byMe, legs };
+  const rest = readDays().filter((r) => !(r.city === city && r.date === date));
+  store.set('sora.days', JSON.stringify([...rest, rec].sort((a, b) => a.date.localeCompare(b.date)).slice(-KEEP_DAYS)));
+}
 // shortcut: reminders fire only while a Sora tab is open (setTimeout + Notification); needs a service worker + push for background delivery
 function schedule(r: Reminder) {
   const ms = Date.parse(r.at) - Date.now();
@@ -99,7 +136,7 @@ function schedule(r: Reminder) {
 }
 
 export const placeLL = (st: State, k: string): LatLng | undefined =>
-  k.startsWith('custom_') ? st.custom[k.slice(7)] : PLACES.find((p) => p.k === k)?.ll;
+  k.startsWith('custom_') ? st.custom[k.slice(7)] : placeOf(k)?.ll;
 
 /** POST /api/plan body from the trip form. Form times are IST "HH:MM", placed at or after the forecast start. */
 export function planRequest(st: State, F: Field): PlanRequest | { error: 'missing'; message: string } {
@@ -128,23 +165,32 @@ function applyDemoToPlan(st: State, res: PlanOk): PlanOk {
   return res;
 }
 
-/* What-if questions → POST /api/counterfactual changes (labels/icons are UI copy). */
-export const QUESTIONS = WHATIF.map((w) => ({ q: w.q, icon: w.icon }));
-function questionChanges(F: Field): Change[] {
-  const gymB = PLACES.find((p) => p.k === 'greenpark')!.ll;
+/** What-if questions for the current trip → POST /api/counterfactual changes. */
+function whatIfQuestions(st: State, F: Field): { q: string; icon: string; change: Change }[] {
+  const t = st.trip, dest = placeLL(st, t.dest);
   const ser = fieldSeries(F).slice(0, 24), peak = ser.reduce((b, s, i) => (s.median > ser[b].median ? i : b), 0);
   const peakMs = Date.parse(F.times[peak]);
-  return [
-    { kind: 'shift_departure', minutes: 30 },
-    { kind: 'mode', mode: 'metro' },
-    { kind: 'destination', dest: gymB, dest_building: 'ac_filtered' },
-    { kind: 'stay_indoors', start: new Date(peakMs - HOUR_MS).toISOString(), end: new Date(peakMs + 2 * HOUR_MS).toISOString() },
+  const qs: { q: string; icon: string; change: Change }[] = [
+    { q: 'Leave 30 min later', icon: 'clock', change: { kind: 'shift_departure', minutes: 30 } },
+    t.mode === 'metro'
+      ? { q: 'Go by car instead', icon: 'car', change: { kind: 'mode', mode: 'car_ac' } }
+      : { q: 'Take the metro', icon: 'train-front', change: { kind: 'mode', mode: 'metro' } },
   ];
+  /* a day stop at this trip's destination that lists an alternative place, else the same place with filtered AC */
+  const stop = st.dayStops.find((s) => s.place === t.dest && s.alt), alt = stop && placeOf(stop.alt);
+  if (alt && stop) qs.push({ q: `Go to ${alt.name} instead`, icon: 'map-pin', change: { kind: 'destination', dest: alt.ll, dest_building: stop.altBld } });
+  else if (dest && t.db !== 'ac_filtered') qs.push({ q: 'If the destination had filtered AC', icon: 'air-vent', change: { kind: 'destination', dest, dest_building: 'ac_filtered' } });
+  qs.push({ q: 'Stay indoors during the peak', icon: 'house', change: { kind: 'stay_indoors', start: new Date(peakMs - HOUR_MS).toISOString(), end: new Date(peakMs + 2 * HOUR_MS).toISOString() } });
+  return qs;
 }
 
 /** POST /api/day body from the Plan my day editor, for the day planDay0 picks. */
 function dayRequest(st: State, F: Field): DayRequest {
-  const P = (k: string) => { const p = PLACES.find((x) => x.k === k)!; return { label: p.name, lat: p.ll[0], lon: p.ll[1] }; };
+  const P = (k: string) => {
+    const p = placeOf(k);
+    if (!p) throw new ApiError(400, 'invalid', 'Choose a place for every stop.');
+    return { label: p.name, lat: p.ll[0], lon: p.ll[1] };
+  };
   const day0 = planDay0(F), at = (t: string) => (t ? new Date(day0 + toMin(t) * 60e3).toISOString() : undefined);
   return {
     city: st.city, mode: st.prefs.mode, max_extra_min: st.prefs.extra,
@@ -169,6 +215,17 @@ function useSoraStore() {
   const rm = useMemo(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches, []);
   const timers = useRef<{ plan?: number }>({});
   const seq = useRef({ plan: 0, whatif: 0 });
+  const exampleFor = useRef<string | null>(null);
+
+  /** A place picked from search becomes selectable as a trip start, destination or day stop. */
+  const addPlace = useCallback((p: Place) => {
+    registerPlaces([p]);
+    setSt((s) => {
+      const next = s.places.some((x) => x.k === p.k) ? s : { ...s, places: [...s.places, p] };
+      ref.current = next;
+      return next;
+    });
+  }, []);
 
   const set = useCallback((p: Patch) => {
     setSt((s) => {
@@ -215,9 +272,10 @@ function useSoraStore() {
     if (!F || F === 'unavailable') return;
     const req = planRequest(s, F);
     if ('error' in req) return;
-    set({ whatif: QUESTIONS.map(() => null) });
-    const answers = await Promise.all(questionChanges(F).map((change) => api.counterfactual({ plan: req, change }).catch(() => 'error' as const)));
-    if (id === seq.current.whatif) set({ whatif: answers });
+    const qs = whatIfQuestions(s, F);
+    set({ whatif: qs.map((q) => ({ q: q.q, icon: q.icon, a: null })) });
+    const answers = await Promise.all(qs.map((q) => api.counterfactual({ plan: req, change: q.change }).catch(() => 'error' as const)));
+    if (id === seq.current.whatif) set({ whatif: qs.map((q, i) => ({ q: q.q, icon: q.icon, a: answers[i] })) });
   }, [set]);
 
   const toastTimer = useRef(0);
@@ -227,12 +285,17 @@ function useSoraStore() {
     toastTimer.current = window.setTimeout(() => set({ toast: null }), 5000);
   }, [set]);
 
-  /** `field` is passed at load time: set() updates ref.current lazily, so the new field may not be in it yet. */
-  const loadDay = useCallback(async (field?: Field) => {
+  /** `field` and `stops` are passed at load time: set() updates ref.current lazily, so they may not be in it yet. */
+  const loadDay = useCallback(async (field?: Field, stops?: DayStop[]) => {
     const F = field ?? ref.current.fields.pm25;
     if (!F || F === 'unavailable') return;
+    const s = stops ? { ...ref.current, dayStops: stops } : ref.current;
     set({ dayBusy: true });
-    try { set({ day: await api.day(dayRequest(ref.current, F)), dayBusy: false, dayDone: true }); }
+    try {
+      const day = await api.day(dayRequest(s, F));
+      set({ day, dayBusy: false, dayDone: true });
+      saveDay(s.city, new Date(planDay0(F) + IST_MS).toISOString().slice(0, 10), day, s.dayStops, s.prefs.mode); // IST date
+    }
     catch (e) {
       set({ dayBusy: false, ...(isOffline(e) ? { offline: true } : {}) });
       if (!isOffline(e)) notify((e as ApiError).message);
@@ -256,7 +319,7 @@ function useSoraStore() {
   const clearHistory = useCallback(() => {
     DEVICE_KEYS.forEach((k) => { try { localStorage.removeItem(k); } catch { /* private mode */ } });
     set({ menuOpen: false });
-    notify('History on this device deleted: reminders and saved notices.');
+    notify('History on this device deleted: planned days, reminders and saved notices.');
   }, [set, notify]);
 
   const selectOpt = useCallback((id: RouteId) => {
@@ -327,11 +390,21 @@ function useSoraStore() {
     set({ booting: true, fields: {}, events: [], res: null, day: null, pt: null, t: 0 });
     (async () => {
       try {
-        const pm = await api.field(city, 'pm25');
+        /* places can fail on their own (e.g. a city without a place list): keep the current ones then */
+        const [pm, pl] = await Promise.all([api.field(city, 'pm25'), api.places(city).catch(() => null)]);
         if (!live) return;
+        let stops: DayStop[] | undefined;
+        if (pl) {
+          registerPlaces(pl.places);
+          /* the example replaces the trip and day only on arriving in a city, never on a retry, so edits survive */
+          const ex = pl.example && exampleFor.current !== city ? fromExample(pl.example, ref.current.trip) : null;
+          exampleFor.current = city;
+          stops = ex?.dayStops;
+          set({ places: pl.places, example: pl.example, ...(ex ?? {}) });
+        }
         set({ fields: { pm25: pm }, booting: false, offline: false });
         runPlan(false);
-        loadDay(pm);
+        loadDay(pm, stops);
         api.events(city).then((ev) => live && set({ events: ev }), () => {});
         POLL.filter((p) => p.k !== 'pm25').forEach((p) => api.field(city, p.k).then(
           (f) => live && set((s) => ({ fields: { ...s.fields, [p.k]: f } })),
@@ -347,7 +420,7 @@ function useSoraStore() {
 
   return {
     st, set, ref, mapRef, searchElRef, rm, runPlan, askWhatIf, loadDay, selectOpt, setTrip, applyDemo, toggleTheme, finishOnboarding, flyTo, openSearch,
-    notify, remind, notifyWhenLive, clearHistory,
+    notify, remind, notifyWhenLive, clearHistory, addPlace,
   };
 }
 

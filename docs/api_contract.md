@@ -182,6 +182,30 @@ Abnormal-episode alerts (spec §30).
   severity: "warning" | "info" | "success"; probability: number }[]
 ```
 
+## GET /api/places?city={key}
+
+The city's featured places and the trip / day the app opens with (backend `config.PLACES`, `config.EXAMPLES`).
+Errors: `not_built`, `unknown_city`.
+
+```ts
+{
+  places: Place[];
+  example: {
+    trip: { origin: string; dest: string; mode: Mode; dep: string; origin_building: Building; dest_building: Building };  // place keys; dep is IST "HH:MM"
+    day: { name: string; place: string; alt?: string; alt_building?: Building; after?: string; before?: string;
+           duration_min?: number; building: Building; activity: "rest" | "light" | "moderate" | "high" }[];
+  } | null;
+}
+Place = { key: string; name: string; sub: string; lat: number; lon: number; building: Building | null }
+```
+
+## GET /api/search?city={key}&q={text}
+
+Up to 8 places matching `q` (2+ characters), all inside `route_bbox`: featured places, then OSM neighbourhoods,
+stations and everyday destinations (colleges, gyms, markets…), then named roads. Search runs on Sora's server from a
+cached OSM extract; the query never goes to a third party. Returns `Place[]`. Errors: `invalid` (no `q`), `not_built`,
+`unknown_city`. If the OSM extract can't be fetched, only featured places are searched.
+
 ## GET /api/health
 
 For uptime checks, not used by the app. `200` when every live city has a field to serve (current, or under 3 h old
@@ -195,7 +219,8 @@ after an upstream failure), else `503`. Never triggers a build.
 
 Exposure history, trends and proactive suggestions are computed **on the device** from the user's
 own trajectory history (spec §27, §40, §41.3). Raw location history never goes to the server, so
-there is deliberately no `/api/insights`. The current Insights screen shows sample history.
+there is deliberately no `/api/insights`. Until trajectories are tracked, the Insights screen shows the days the user
+planned (each `/api/day` result is kept in localStorage, last 30) and suggestions from the live plan, day and events.
 
 ## Routable area (Delhi)
 

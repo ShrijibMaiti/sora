@@ -18,6 +18,41 @@ def fetch(bbox, path):
     path.write_bytes(r.content)
 
 
+PLACE_QUERY = """[out:json][timeout:180];
+(
+  node["place"~"^(suburb|neighbourhood|quarter|locality|village|hamlet)$"]["name"]({b});
+  nwr["amenity"~"^(college|university|school|hospital|clinic|restaurant|cafe|fast_food|marketplace|library|cinema|bus_station)$"]["name"]({b});
+  nwr["leisure"~"^(fitness_centre|sports_centre|park|stadium)$"]["name"]({b});
+  nwr["shop"="mall"]["name"]({b});
+  nwr["railway"="station"]["name"]({b});
+  nwr["tourism"~"^(attraction|museum|hotel)$"]["name"]({b});
+);
+out center tags;"""
+PLACE_KINDS = ("place", "railway", "amenity", "leisure", "shop", "tourism")
+
+
+def fetch_places(bbox, path):
+    """Named neighbourhoods, landmarks and everyday destinations (search, spec §7.2)."""
+    s, w, n, e = bbox
+    r = httpx.post(URL, data={"data": PLACE_QUERY.format(b=f"{s},{w},{n},{e}")}, headers={"User-Agent": "sora-research/0.1"}, timeout=240)
+    r.raise_for_status()
+    path.write_bytes(r.content)
+
+
+def load_places(path):
+    """[{id, name, kind, value, lat, lon}] from a fetch_places file; English names where OSM has them."""
+    out = []
+    for el in json.loads(path.read_text(encoding="utf-8"))["elements"]:
+        tags = el.get("tags", {})
+        name = tags.get("name:en") or tags.get("name")
+        pos = el if "lat" in el else el.get("center")
+        kind = next((k for k in PLACE_KINDS if k in tags), None)
+        if name and pos and kind:
+            out.append({"id": f"{el['type'][0]}{el['id']}", "name": name, "kind": kind, "value": tags[kind],
+                        "lat": pos["lat"], "lon": pos["lon"]})
+    return out
+
+
 def load_graph(path):
     """Directed graph; every street has both directions, with motor_ok False against a one-way."""
     G = nx.DiGraph()

@@ -1,13 +1,15 @@
 """Shared fixtures: synthetic Open-Meteo data and a synthetic Delhi street grid, so no test touches the network."""
+import json
+
 import networkx as nx
 import numpy as np
 import pandas as pd
 import pytest
 
 from sora import config
-from sora.data import openmeteo
+from sora.data import openmeteo, osm
 from sora.field import forecast
-from sora.representation import road_graph
+from sora.representation import places, road_graph
 from sora.uncertainty import ensemble
 
 N = config.GRID_N ** 2
@@ -58,11 +60,23 @@ def street_grid():
 GRID = street_grid()
 
 
+OSM_PLACES = {"elements": [
+    {"type": "node", "id": 1, "lat": 28.555, "lon": 77.200, "tags": {"place": "neighbourhood", "name": "Hauz Khas"}},
+    {"type": "node", "id": 2, "lat": 28.556, "lon": 77.201, "tags": {"leisure": "fitness_centre", "name": "Gold's Gym"}},
+    {"type": "way", "id": 3, "center": {"lat": 28.600, "lon": 77.228}, "tags": {"amenity": "marketplace", "name": "Khan Market Stalls"}},
+    {"type": "node", "id": 4, "lat": 28.70, "lon": 77.20, "tags": {"amenity": "cafe", "name": "Outside Café"}},  # beyond route_bbox
+    {"type": "node", "id": 5, "lat": 28.57, "lon": 77.21, "tags": {"amenity": "cafe"}},  # no name
+]}
+
+
 @pytest.fixture(autouse=True)
-def fresh(monkeypatch):
+def fresh(monkeypatch, tmp_path):
     forecast._cache.clear()
     forecast._failed.clear()
     ensemble._cache.clear()
+    places._index.clear()
+    monkeypatch.setattr(config, "CACHE", tmp_path)  # never read or write the real data_cache
+    monkeypatch.setattr(osm, "fetch_places", lambda bbox, path: path.write_text(json.dumps(OSM_PLACES), encoding="utf-8"))
     for k in ("OPENAQ_API_KEY", "FIRMS_MAP_KEY"):  # a developer's real keys must not send tests to the network
         monkeypatch.delenv(k, raising=False)
     monkeypatch.setattr(openmeteo, "fetch_points", fake_points())

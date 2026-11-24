@@ -1,5 +1,6 @@
 /* Sora mock data + deterministic Delhi model (port of the prototype's sora-kit.js).
    Shapes follow the §7 API contracts: GET /api/field, POST /api/plan. */
+import type { Example } from '../api/types';
 
 export type LatLng = [number, number];
 export type Band = { median: number; p05: number; p95: number };
@@ -133,18 +134,31 @@ export const hexPoly = (la: number, lo: number, r: number, sc = 0.86): LatLng[] 
 };
 
 /* ---------- trips ---------- */
-export type Place = { k: string; name: string; sub: string; ll: LatLng };
+export type Place = { k: string; name: string; sub: string; ll: LatLng; building?: BuildingKey };
+/* Delhi demo places: the mock's /api/places and the fail-safe the app starts with until the API answers.
+   The real list is backend config.PLACES (Anand Vihar and Noida stay here to demo the "outside" error in mock mode). */
 export const PLACES: Place[] = [
   { k: 'saket', name: 'Saket', sub: 'Select Citywalk, Press Enclave Marg', ll: [28.5245, 77.2066] },
   { k: 'cp', name: 'Connaught Place', sub: 'Inner Circle, New Delhi', ll: [28.6315, 77.2167] },
   { k: 'lajpat', name: 'Lajpat Nagar', sub: 'Central Market, Lajpat Nagar II', ll: [28.5677, 77.2433] },
   { k: 'iitd', name: 'IIT Delhi', sub: 'Hauz Khas, New Delhi', ll: [28.545, 77.1926] },
-  { k: 'hkv', name: 'Hauz Khas Village', sub: 'Gym A · Naturally ventilated', ll: [28.5535, 77.194] },
-  { k: 'greenpark', name: 'Green Park', sub: 'Gym B · AC with filter', ll: [28.559, 77.206] },
+  { k: 'hkv', name: 'Hauz Khas Village', sub: 'Gym A · Naturally ventilated', ll: [28.5535, 77.194], building: 'naturally_ventilated' },
+  { k: 'greenpark', name: 'Green Park', sub: 'Gym B · AC with filter', ll: [28.559, 77.206], building: 'ac_filtered' },
   { k: 'khan', name: 'Khan Market', sub: 'Rabindra Nagar, New Delhi', ll: [28.6003, 77.227] },
   { k: 'av', name: 'Anand Vihar', sub: 'ISBT, East Delhi', ll: [28.6469, 77.3159] },
   { k: 'noida', name: 'Noida Sector 62', sub: 'Outside the covered area', ll: [28.627, 77.372] },
 ];
+/* Delhi's example trip and day (backend config.EXAMPLES): the mock's answer and the app's first-paint fail-safe. */
+export const DEMO_EXAMPLE: Example = {
+  trip: { origin: 'saket', dest: 'cp', mode: 'car_ac', dep: '18:15', origin_building: 'naturally_ventilated', dest_building: 'ac_sealed' },
+  day: [
+    { name: 'Home', place: 'lajpat', before: '08:20', building: 'naturally_ventilated', activity: 'rest' },
+    { name: 'College', place: 'iitd', after: '08:45', duration_min: 455, building: 'naturally_ventilated', activity: 'light' },
+    { name: 'Gym', place: 'hkv', alt: 'greenpark', alt_building: 'ac_filtered', duration_min: 75, building: 'naturally_ventilated', activity: 'high' },
+    { name: 'Restaurant', place: 'khan', after: '18:45', duration_min: 105, building: 'ac_sealed', activity: 'light' },
+    { name: 'Home', place: 'lajpat', building: 'naturally_ventilated', activity: 'rest' },
+  ],
+};
 export type ModeKey = 'walk' | 'cycle' | 'two_wheeler' | 'auto' | 'car_ac' | 'bus' | 'metro';
 export const MODES: { k: ModeKey; label: string; icon: string; short: string }[] = [
   { k: 'walk', label: 'Walk', icon: 'footprints', short: 'Walk' },

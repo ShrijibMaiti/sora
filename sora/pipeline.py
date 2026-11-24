@@ -9,7 +9,7 @@ import time
 
 from . import config
 from .field import forecast
-from .representation import road_graph
+from .representation import places, road_graph
 
 log = logging.getLogger("sora.pipeline")
 AFTER_HOUR_S = 5
@@ -25,6 +25,7 @@ def run_once() -> bool:
         try:
             forecast.get(key)
             road_graph.get(key)
+            places.index(key)  # cached after the first build; first start fetches OSM names (~10 s)
         except Exception:  # keep the loop alive whatever happens; requests report errors themselves
             log.exception("refresh failed for %s", key)
         ok = ok and forecast.is_fresh(key)
