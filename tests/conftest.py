@@ -61,6 +61,9 @@ GRID = street_grid()
 @pytest.fixture(autouse=True)
 def fresh(monkeypatch):
     forecast._cache.clear()
+    forecast._failed.clear()
     ensemble._cache.clear()
+    for k in ("OPENAQ_API_KEY", "FIRMS_MAP_KEY"):  # a developer's real keys must not send tests to the network
+        monkeypatch.delenv(k, raising=False)
     monkeypatch.setattr(openmeteo, "fetch_points", fake_points())
     monkeypatch.setattr(road_graph, "get", lambda key: GRID)

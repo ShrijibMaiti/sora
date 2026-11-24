@@ -1,0 +1,11 @@
+.git
+.github
+**/__pycache__
+.pytest_cache
+*.egg-info
+data_cache
+graphify-out
+tests
+docs
+web/node_modules
+web/dist

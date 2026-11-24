@@ -24,6 +24,28 @@ def _get(client, path, params):
     r.raise_for_status()
 
 
+def stations(bbox, now, api_key=None, max_age_h=3):
+    """Reference PM2.5 monitors in bbox as [{name, lat, lon, reporting}], from one /locations call; None without a key.
+
+    `reporting` = a value within the last `max_age_h` hours (OpenAQ `datetimeLast`).
+    """
+    key = api_key or os.environ.get("OPENAQ_API_KEY")
+    if not key:
+        return None
+    s, w, n, e = bbox
+    with httpx.Client(headers={"X-API-Key": key}, timeout=60) as c:
+        locs = _get(c, "/locations", {"bbox": f"{w},{s},{e},{n}", "parameters_id": PM25, "limit": 1000})["results"]
+    out = []
+    for loc in locs:
+        if not loc.get("isMonitor"):
+            continue
+        last = (loc.get("datetimeLast") or {}).get("utc")
+        out.append({"name": loc.get("name") or f"Station {loc['id']}",
+                    "lat": loc["coordinates"]["latitude"], "lon": loc["coordinates"]["longitude"],
+                    "reporting": bool(last) and now - pd.Timestamp(last) <= pd.Timedelta(hours=max_age_h)})
+    return out
+
+
 def fetch_pm25(bbox, start, end, api_key=None):
     """DataFrame [station, lat, lon, time (UTC hour), value µg/m³], or None without a key/data."""
     key = api_key or os.environ.get("OPENAQ_API_KEY")

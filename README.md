@@ -158,13 +158,41 @@ sora/
   (`field/forecast.py`, degradation L5), forecast-driven alerts (`events/detect.py`), and the planner
   (`decision/routing.py` trip, `schedule.py` day, `counterfactual.py` what-if) on the OSM road graph
   (`representation/road_graph.py`, downloaded once to `data_cache/`, ~40 s) with paired confidence on shared samples
-  (`uncertainty/ensemble.py`, `decision/confidence.py`).
-- **Frontend (`web/`):** landing page and app UI built; mock backend by default, real backend with `VITE_USE_MOCK=false`.
+  (`uncertainty/ensemble.py`, `decision/confidence.py`). `pipeline.py` rebuilds the field just after every hour;
+  OpenAQ station status and FIRMS fires (`data/fires.py`) are shown on the map and drive the smoke alert when their
+  keys are set, but are not assimilated (the field stays CAMS-only, L5).
+- **Frontend (`web/`):** landing page and app UI built. `npm run dev` uses the in-browser mock; production builds call
+  the real API. Override with `VITE_USE_MOCK=true|false`.
+
+## Run
+
+Development (two terminals):
 
 ```
 pip install -e ".[dev]"
-uvicorn sora.api.main:app --reload            # API on :8000 (first /api/field call fetches CAMS, ~10 s)
+uvicorn sora.api.main:app --reload            # API on :8000; first start fetches CAMS (~10 s) and the OSM graph (~40 s)
 cd web; npm install
-$env:VITE_USE_MOCK='false'; npm run dev       # app on :5173, /api forwarded to :8000
-pytest                                        # API tests, no network
+$env:VITE_USE_MOCK='false'; npm run dev       # app on :5173 against the API (omit the variable for the mock)
+pytest                                        # backend tests on synthetic data, no network
 ```
+
+Production, one process serving the API and the built app (`/`, `/app`, `/styleguide`, `/api/*`):
+
+```
+cd web; npm ci; npm run build; cd ..
+uvicorn sora.api.main:app --host 0.0.0.0 --port 8000
+python scripts/smoke.py http://localhost:8000  # release check in a real browser (pip install -e ".[e2e]"; playwright install chromium)
+```
+
+Docker: `docker build -t sora .` then `docker run -p 8000:8000 -v sora-data:/data sora`. `/api/health` returns 200
+while every live city has a field to serve, and the image's HEALTHCHECK uses it.
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `OPENAQ_API_KEY` | unset | Station status on the map ([free key](https://explore.openaq.org/register)) |
+| `FIRMS_MAP_KEY` | unset | Active fires and the upwind-smoke alert ([free key](https://firms.modaps.eosdis.nasa.gov/api/map_key/)) |
+| `SORA_CACHE` | `data_cache/` (`/data` in Docker) | OSM road graph cache |
+| `SORA_WEB_DIST` | `web/dist` | Built web app to serve; nothing is served if the folder is missing |
+| `SORA_LOG_LEVEL` | `INFO` | Python log level |
+
+CI (`.github/workflows/ci.yml`) runs the backend tests, the web typecheck and build, and the Docker build.

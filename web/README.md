@@ -21,7 +21,7 @@ npm run build    # typecheck + production build
 
 ### Mock vs real backend
 
-The app uses the in-browser mock by default. To call the FastAPI backend on `:8000` (Vite forwards `/api` in `dev` and `preview`):
+`npm run dev` uses the in-browser mock; production builds (`npm run build`) call the real `/api`, which FastAPI serves from the same origin (see the root README). To call the FastAPI backend on `:8000` from dev (Vite forwards `/api` in `dev` and `preview`):
 
 ```
 VITE_USE_MOCK=false npm run dev                                  # macOS/Linux

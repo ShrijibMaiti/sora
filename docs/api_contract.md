@@ -182,6 +182,15 @@ Abnormal-episode alerts (spec §30).
   severity: "warning" | "info" | "success"; probability: number }[]
 ```
 
+## GET /api/health
+
+For uptime checks, not used by the app. `200` when every live city has a field to serve (current, or under 3 h old
+after an upstream failure), else `503`. Never triggers a build.
+
+```ts
+{ ok: boolean; cities: { [key: string]: { fresh: boolean; analysis_time: ISO | null; usable: boolean } } }
+```
+
 ## Not an endpoint: Insights
 
 Exposure history, trends and proactive suggestions are computed **on the device** from the user's

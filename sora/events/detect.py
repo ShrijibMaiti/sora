@@ -7,6 +7,37 @@ import numpy as np
 
 STAGNANT_BLH_M, STAGNANT_WIND_MS = 250, 1.5
 RAIN_MM_H = 1.0
+FIRE_MIN, UPWIND_DEG, FIRE_HOURS = 10, 45, 36  # fires within ±45° of where the wind comes from; persistence for 36 h
+COMPASS = ["north", "north-east", "east", "south-east", "south", "south-west", "west", "north-west"]
+
+
+def _bearing(lat0, lon0, lat, lon):
+    """Degrees clockwise from north, from (lat0, lon0) to each point."""
+    p0, p1, dl = np.radians(lat0), np.radians(lat), np.radians(np.subtract(lon, lon0))
+    return np.degrees(np.arctan2(np.sin(dl) * np.cos(p1), np.cos(p0) * np.sin(p1) - np.sin(p0) * np.cos(p1) * np.cos(dl))) % 360
+
+
+def _fire_event(met, fires, center):
+    if len(fires) < FIRE_MIN or center is None:
+        return None
+    pts = np.asarray(fires, float)
+    b = _bearing(center[0], center[1], pts[:, 0], pts[:, 1])
+    frm = np.asarray(met["wind_from_deg"][:FIRE_HOURS], float)
+    off = np.abs((b[None, :] - frm[:, None] + 180) % 360 - 180)  # (hours, fires)
+    upwind = (off <= UPWIND_DEG).sum(1)
+    runs = _runs(upwind >= FIRE_MIN, 3)
+    if not runs:
+        return None
+    a, e = runs[0]
+    n = int(upwind[a:e].max())
+    side = COMPASS[int(((np.median(b[off[a] <= UPWIND_DEG]) + 22.5) % 360) // 45)]
+    return {
+        "kind": "fire", "title": "Smoke from upwind fires",
+        "body": f"{n} active fires were detected to the {side} in the last day, and the wind blows from that side, "
+                f"so smoke can reach the city.",
+        "start": met["times"][a], "end": met["times"][e] if e < len(met["times"]) else None,
+        "severity": "warning", "probability": _prob(a),
+    }
 
 
 def _runs(mask, min_len):
@@ -37,11 +68,12 @@ def _prob(start_h):
     return 0.8 if start_h < 24 else 0.65 if start_h < 48 else 0.5
 
 
-def from_forecast(met: dict) -> list[dict]:
-    """Contract ApiEvent list from city-mean hourly met (keys as in field.forecast.build), soonest first."""
+def from_forecast(met: dict, fires=(), center=None) -> list[dict]:
+    """Contract ApiEvent list from city-mean hourly met (keys as in field.forecast.build), soonest first.
+    `fires` ([lat, lon] detections) and the city `center` enable the upwind-smoke alert."""
     times, blh, wind, rain = met["times"], met["boundary_layer_height"], met["wind_speed_10m"], met["precipitation"]
     end = lambda b: times[b] if b < len(times) else None  # still going at the end of the forecast
-    events = []
+    events = [e for e in [_fire_event(met, fires, center)] if e]
     stagnant = (blh < STAGNANT_BLH_M) & (wind < STAGNANT_WIND_MS)
     for a, b in _merge(_runs(stagnant, 3), 12):
         depth = max(50, int(np.ceil(np.nanmedian(blh[a:b][stagnant[a:b]]) / 50) * 50))

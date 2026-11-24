@@ -10,6 +10,8 @@ router = APIRouter()
 
 @router.get("/events")
 def events(city: str):
-    if not city_or_fail(city, need_built=False).built:
+    c = city_or_fail(city, need_built=False)
+    if not c.built:
         return []
-    return detect.from_forecast(forecast_or_fail(city)["met"])
+    f = forecast_or_fail(city)
+    return detect.from_forecast(f["met"], f["field"]["fires"], c.center)

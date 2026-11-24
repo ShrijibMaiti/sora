@@ -1,5 +1,5 @@
-/* Typed client for the Sora API (docs/api_contract.md). Mock by default until the backend serves /api;
-   set VITE_USE_MOCK=false to call FastAPI (Vite forwards /api to :8000 in dev). */
+/* Typed client for the Sora API (docs/api_contract.md). Production builds call the real /api; `npm run dev` uses the
+   in-browser mock. Override either way with VITE_USE_MOCK=true|false (Vite forwards /api to :8000 in dev and preview). */
 import type { DaySeg, PlanOk, PollKey, TripOption } from '../data/sora';
 import { istHHMM, istMinutes } from '../lib/time';
 import * as mock from './mock';
@@ -8,7 +8,8 @@ import {
   type PlanRequest, type PlanResponse, type Segment, type WireOption,
 } from './types';
 
-export const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false';
+const mockEnv = import.meta.env.VITE_USE_MOCK;
+export const USE_MOCK = mockEnv ? mockEnv !== 'false' : import.meta.env.DEV;
 
 async function http<T>(path: string, body?: unknown): Promise<T> {
   let r: Response;
