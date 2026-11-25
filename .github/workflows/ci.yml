@@ -31,6 +31,33 @@ jobs:
       - run: npm ci
       - run: npm run build  # typecheck + production build
 
+  e2e:
+    # the built app against SORA_FAKE_DATA=1 in a real browser: every screen, offline mode, accessibility (WCAG 2.1 AA)
+    runs-on: ubuntu-latest
+    needs: [api, web]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci && npm run build
+        working-directory: web
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[e2e]" && playwright install --with-deps chromium
+      - name: start Sora on synthetic data
+        run: |
+          SORA_FAKE_DATA=1 SORA_RATE_LIMIT=off uvicorn sora.api.main:app --port 8000 > server.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf localhost:8000/api/health && break; sleep 2; done
+      - run: python scripts/smoke.py http://localhost:8000
+      - run: python scripts/a11y.py http://localhost:8000
+      - if: failure()
+        run: cat server.log
+
   docker:
     runs-on: ubuntu-latest
     needs: [api, web]

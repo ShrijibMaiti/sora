@@ -25,7 +25,7 @@ Landing v2 adds an editorial structure (after the Stratum reference): lowercase 
 | --text-primary / secondary / tertiary | #EEF0F3 / #A9ADB6 / #969AA3 | #14161A / #474C55 / #5F646E | Values / body / meta (all ≥4.5:1) | Tertiary for essential copy |
 | --brand | #2F6AE6 | #2563EB | Primary CTA, selected, recommended | Tints on panels, warnings |
 | --focus-ring | #8FB3FF | #2563EB | 2px outline, 2px offset | Remove outlines |
-| --info / success / warning / danger | #6A9BFF / #3CCF7A / #F2B347 / #FF6B6B | #2563EB / #0F7A43 / #9A5B00 / #C62828 | Status only; pair with icon + text | Encode AQI |
+| --info / success / warning / danger | #6A9BFF / #3CCF7A / #F2B347 / #FF6B6B | #2563EB / #0D6E3C / #9A5B00 / #C62828 | Status only; pair with icon + text | Encode AQI |
 
 ### Data colour (separate from brand)
 - **AQI (CPCB, fixed)**: Good #00B050 · Satisfactory #92D050 · Moderately polluted #FFFF00 · Poor #FF9900 · Very poor #FF0000 · Severe #C00000. Ink #0B0C0E on all except Severe (#FFF). Always shown with the text label. Map fill at --field-opacity (.36 dark / .34 light).

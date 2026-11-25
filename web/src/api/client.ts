@@ -11,6 +11,11 @@ import {
 const mockEnv = import.meta.env.VITE_USE_MOCK;
 export const USE_MOCK = mockEnv ? mockEnv !== 'false' : import.meta.env.DEV;
 
+/* The service worker answers GETs from its saved copy when offline and marks them "x-sora-offline: <saved at>".
+   Listeners hear the saved time for a forecast answer, and null once a live forecast arrives again. */
+const savedListeners = new Set<(savedAt: string | null) => void>();
+export const onSaved = (fn: (savedAt: string | null) => void) => { savedListeners.add(fn); return () => savedListeners.delete(fn); };
+
 async function http<T>(path: string, body?: unknown): Promise<T> {
   let r: Response;
   try {
@@ -18,6 +23,11 @@ async function http<T>(path: string, body?: unknown): Promise<T> {
   } catch {
     throw new ApiError(0, 'network', "Can't reach Sora's servers.");
   }
+  if (path.startsWith('/field')) {
+    const off = r.headers.get('x-sora-offline');
+    savedListeners.forEach((f) => f(off === null ? null : off || 'earlier'));
+  }
+  if (r.status === 429) throw new ApiError(429, 'rate_limited', 'Too many requests. Try again in a moment.');
   if (!r.ok) {
     const d = await r.json().then((j) => j?.detail, () => null);
     if (d && typeof d === 'object' && !Array.isArray(d) && typeof d.code === 'string') throw new ApiError(r.status, d.code, String(d.message ?? d.code), d);

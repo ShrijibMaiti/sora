@@ -32,11 +32,14 @@ export function FloatTop({ L }: { L: Layout }) {
   const degraded = st.demo === 'degraded';
   const sparse = degraded || (meta ? meta.n_reporting / Math.max(1, meta.n_stations) < 0.5 : true);
   const alertEvent = st.events.find((e) => e.severity === 'warning');
+  const savedTime = st.savedAt && !Number.isNaN(Date.parse(st.savedAt)) ? `${relDay(st.savedAt, new Date().toISOString())} ${istHHMM(st.savedAt)}` : 'earlier';
   const banner = degraded
-    ? { icon: 'satellite', text: "Satellite data only: treat advice as indicative. Ground stations haven't reported since 11:00.", c: 'var(--warning)', action: 'Dismiss' }
-    : st.demo === 'offline' ? { icon: 'cloud-off', text: "Can't reach Sora's servers. Retrying every 30 s.", c: 'var(--danger)', action: 'Retry now' } : null;
+    ? { icon: 'satellite', text: "Satellite data only: treat advice as indicative. Ground stations haven't reported since 11:00.", c: 'var(--warning)', action: 'Dismiss', act: () => applyDemo('none') }
+    : st.demo === 'offline' ? { icon: 'cloud-off', text: "Can't reach Sora's servers. Retrying every 30 s.", c: 'var(--danger)', action: 'Retry now', act: () => applyDemo('none') }
+      : st.savedAt ? { icon: 'cloud-off', text: `You're offline. This is the forecast saved ${savedTime}; trip and day planning need a connection.`, c: 'var(--warning)', action: 'Retry', act: () => applyDemo('loading') }
+        : null;
   /* the Data chip never claims "good" while offline or degraded; its dot matches the banner's colour */
-  const offline = st.offline || st.demo === 'offline';
+  const offline = st.offline || st.demo === 'offline' || !!st.savedAt;
   const data = offline ? { dot: 'var(--danger)', label: 'Offline', time: `last ${updated.replace(' IST', '')}` }
     : degraded ? { dot: 'var(--warning)', label: 'Data: limited', time: updated.replace(' IST', '') }
       : { dot: degr.c, label: degr.conf === 'Low' || sparse ? 'Data: limited' : 'Data: good', time: updated.replace(' IST', '') };
@@ -165,7 +168,7 @@ export function FloatTop({ L }: { L: Layout }) {
         <div role="alert" className="banner" style={{ border: `1px solid ${banner.c}` }}>
           <span style={{ color: banner.c, display: 'flex' }}><Icon name={banner.icon} size={15} /></span>
           <span style={{ flex: 1 }}>{banner.text}</span>
-          <button className="btn-ghost-sm" style={{ color: 'var(--text-primary)' }} onClick={() => applyDemo('none')}>{banner.action}</button>
+          <button className="btn-ghost-sm" style={{ color: 'var(--text-primary)' }} onClick={banner.act}>{banner.action}</button>
         </div>
       )}
     </div>

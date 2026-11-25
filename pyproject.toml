@@ -9,6 +9,7 @@ dependencies = [
   "scikit-learn>=1.4",
   "networkx>=3.2",
   "scipy>=1.11",
+  "pywebpush>=2.0",
   "httpx>=0.27",
   "fastapi>=0.110",
   "uvicorn>=0.29",

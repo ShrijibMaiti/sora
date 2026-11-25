@@ -31,6 +31,13 @@ the frontend mock (`web/src/api/mock.ts`) implements exactly this contract.
 | `unknown_city` | 404 | City key not recognised |
 | `beyond_horizon` | 400 | Requested times fall outside the 0–72 h forecast |
 | `upstream` | 503 | Forecast inputs (CAMS / met) unreachable and no field from the last 3 h to fall back on |
+| `rate_limited` | 429 | Too many requests from one client; `Retry-After` says when to try again |
+
+Rate limits per client IP: planning (`/plan`, `/day`, `/counterfactual`) 90/min (burst 40), push changes 10/min,
+other `/api` GETs 600/min; `/health` and `/metrics` are never limited. `SORA_RATE_LIMIT=off` disables them (tests).
+
+Offline: the web app's service worker answers `GET /field`, `/events`, `/cities`, `/places` from its saved copy when
+the network is down and adds `x-sora-offline: <ISO time saved>` to that answer.
 
 ## GET /api/cities
 
@@ -225,6 +232,27 @@ Up to 8 places matching `q` (2+ characters), all inside `route_bbox`: featured p
 stations and everyday destinations (colleges, gyms, markets…), then named roads. Search runs on Sora's server from a
 cached OSM extract; the query never goes to a third party. Returns `Place[]`. Errors: `invalid` (no `q`), `not_built`,
 `unknown_city`. If the OSM extract can't be fetched, only featured places are searched.
+
+## Push (Web Push, spec §28)
+
+The server keeps only a push address, an optional city for alerts and wake-up times. Reminder pushes carry no text:
+they wake the service worker, which reads the text from the device (IndexedDB). City alerts carry their (public) text.
+
+| Endpoint | Body | Answer |
+|---|---|---|
+| `GET /api/push/key` | | `{ public_key }`: the VAPID application server key (base64url) |
+| `PUT /api/push/subscription` | `{ subscription: PushSubscriptionJSON; city?: string; alerts?: boolean }` | `{ id }` |
+| `POST /api/push/subscription/{id}/wake` | `{ id: string; at: ISO }` (within 7 days) | `{ ok: true }` |
+| `DELETE /api/push/subscription/{id}` | | `{ removed: boolean }` |
+
+`subscription.endpoint` must be a known push service (Google, Mozilla, Apple, Microsoft), else `invalid`: the server
+sends requests there, so arbitrary URLs are refused. Push payloads: `{type: "wake", id}` or `{type: "alert", title,
+body, tag}`; alerts are warning events starting within 12 h, each sent once per subscription.
+
+## GET /api/metrics
+
+Prometheus text: `sora_requests_total{route,method,status}`, `sora_request_seconds_sum/_count{route}`,
+`sora_field_age_seconds{city}`. With `SORA_METRICS_TOKEN` set, needs `Authorization: Bearer <token>`.
 
 ## GET /api/health
 

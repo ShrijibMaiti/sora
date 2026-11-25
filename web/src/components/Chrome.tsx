@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { BUILDINGS, MODES, type BuildingKey, type ModeKey } from '../data/sora';
-import { useSora, type Demo, type Tab } from '../state/store';
+import { cityOf, useSora, type Demo, type Tab } from '../state/store';
 import type { Layout } from '../lib/layout';
 import { Icon } from './Icon';
 
@@ -88,7 +88,7 @@ export function Select<T extends string>({ value, onChange, options, className =
 const DEV_TOOLS = import.meta.env.DEV || new URLSearchParams(location.search).has('preview');
 
 export function ProfileMenu({ L }: { L: Layout }) {
-  const { st, set, applyDemo, toggleTheme, clearHistory } = useSora();
+  const { st, set, applyDemo, toggleTheme, clearHistory, setNotif } = useSora();
   const [confirmDelete, setConfirmDelete] = useState(false);
   if (!st.menuOpen) return null;
   const themeLabel = st.theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
@@ -111,13 +111,27 @@ export function ProfileMenu({ L }: { L: Layout }) {
           <input type="range" min={0} max={30} step={1} value={st.prefs.extra} onChange={(e) => set((s) => ({ prefs: { ...s.prefs, extra: +e.target.value } }))} style={{ width: '100%', accentColor: 'var(--brand)' }} />
         </label>
       </div>
+      <div className="menu-sec">
+        <span className="menu-cap">Notifications</span>
+        {([['alerts', `Alerts for ${cityOf(st.city).name}`, 'Smoke, stagnant air and festival warnings, even when Sora is closed.'],
+          ['proactive', 'Suggestions for my trip', 'At most once a day, when leaving at another time is clearly better.']] as const).map(([k, label, hint]) => (
+          <button key={k} role="switch" aria-checked={st.notif[k]} className="menu-item" style={{ alignItems: 'flex-start' }} onClick={() => setNotif({ [k]: !st.notif[k] })}>
+            <Icon name={k === 'alerts' ? 'triangle-alert' : 'bell'} size={15} />
+            <span className="stack" style={{ gap: 2, flex: 1, textAlign: 'left' }}>
+              <span>{label}</span><span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)' }}>{hint}</span>
+            </span>
+            <span className="mono" style={{ fontSize: 'var(--fs-label)', color: st.notif[k] ? 'var(--success)' : 'var(--text-tertiary)' }}>{st.notif[k] ? 'On' : 'Off'}</span>
+          </button>
+        ))}
+        <span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)', padding: '0 12px' }}>Sora's server gets only where to send them; reminder texts and your trip stay on this device.</span>
+      </div>
       <div className="menu-sec tight">
         <button className="menu-item" onClick={toggleTheme}><Icon name={st.theme === 'dark' ? 'sun' : 'moon'} size={15} />{themeLabel}</button>
         <button className="menu-item" onClick={() => set({ onb: 0, menuOpen: false })}><Icon name="rotate-ccw" size={15} />Replay onboarding</button>
         <button className="menu-item" aria-live="polite" style={confirmDelete ? { color: 'var(--danger)' } : undefined}
           onClick={() => { if (confirmDelete) { clearHistory(); setConfirmDelete(false); } else setConfirmDelete(true); }}
           onBlur={() => setConfirmDelete(false)}>
-          <Icon name="trash-2" size={15} />{confirmDelete ? 'Tap again to delete reminders and notices' : 'Delete history on this device'}
+          <Icon name="trash-2" size={15} />{confirmDelete ? 'Tap again to delete everything Sora keeps here' : 'Delete history on this device'}
         </button>
       </div>
       {DEV_TOOLS && (

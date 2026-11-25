@@ -48,7 +48,7 @@ const NEUTRALS = [
   ['--border-strong', '#3D4047', '#C3C8D0', 'Hover borders, dividers'], ['--text-primary', '#EEF0F3', '#14161A', 'Headings, values'], ['--text-secondary', '#A9ADB6', '#474C55', 'Body, labels'],
   ['--text-tertiary', '#878B95', '#5F646E', 'Meta, axes (≥4.5:1)'], ['--text-disabled', '#5D616A', '#9A9FA8', 'Disabled only'], ['--hex-empty', '#2A2C31', '#DFE2E8', 'No-data hex'],
 ];
-const BRAND = [['--brand', '#3B7BFF', '#2563EB'], ['--brand-hover', '#5A90FF', '#1D55D6'], ['--brand-soft', '16%', '10%'], ['--focus-ring', '#8FB3FF', '#2563EB'], ['--info', '#6A9BFF', '#2563EB'], ['--success', '#3CCF7A', '#0F7A43'], ['--warning', '#F2B347', '#9A5B00'], ['--danger', '#FF6B6B', '#C62828']];
+const BRAND = [['--brand', '#3B7BFF', '#2563EB'], ['--brand-hover', '#5A90FF', '#1D55D6'], ['--brand-soft', '16%', '10%'], ['--focus-ring', '#8FB3FF', '#2563EB'], ['--info', '#6A9BFF', '#2563EB'], ['--success', '#3CCF7A', '#0D6E3C'], ['--warning', '#F2B347', '#9A5B00'], ['--danger', '#FF6B6B', '#C62828']];
 const TYPE = [
   { n: 'display', fs: 'var(--fs-display)', fw: 300, lh: 1.02, ls: '-0.035em', sample: 'The map isn’t you.', spec: 'clamp 40–76 / 300 / 1.02' },
   { n: 'h1', fs: 'var(--fs-h1)', fw: 400, lh: 1.1, ls: '-0.02em', sample: 'Plan a cleaner day', spec: 'clamp 30–44 / 400 / 1.1' },

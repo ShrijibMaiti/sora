@@ -49,6 +49,7 @@ export function TripPanel() {
         const fix = ex ? example : () => set({ editTrip: true });
         const now = Math.ceil(istMinutes(new Date().toISOString()) / 5) * 5 + 5;
         const E = ({
+          offline: ['cloud-off', "You're offline", 'Try again', runPlan],
           no_feasible: ['clock-alert', 'No departure meets your arrival time', 'Clear arrival time', () => { set({ demo: 'none' }); setTrip({ latest: '' }, true); }],
           outside: ['map-pin-off', 'Point outside the routable area', exLabel, fix],
           no_route: ['route', 'No route for this mode', exLabel, fix],
@@ -175,8 +176,9 @@ function OptionRow({ o, res }: { o: TripOption; res: PlanOk }) {
   const pTxt = p == null ? '' : Math.round(p * 100) + '%';
   const redTxt = isPlan ? 'Your baseline' : `${sgn(-o.reduction_pct.median)}% (${sgn(-o.reduction_pct.p05)} to ${sgn(-o.reduction_pct.p95)})`;
   return (
-    <button className="opt-row" onClick={() => selectOpt(o.id)} aria-pressed={selected} style={gone ? { opacity: 0.6 } : undefined}
-      aria-label={`${o.label}: estimated dose ${o.dose.median} µg, range ${o.dose.p05} to ${o.dose.p95}${p != null ? `, ${pTxt} chance it is lower than your plan` : ''}`}>
+    /* the row's own text is its accessible name (so voice control finds what is on screen); the meter's value is
+       added as screen-reader text */
+    <button className="opt-row" onClick={() => selectOpt(o.id)} aria-pressed={selected} style={gone ? { opacity: 0.6 } : undefined}>
       <svg width="32" height="12" style={{ marginTop: 6 }} aria-hidden="true">
         <line x1="2" y1="6" x2="30" y2="6" stroke="var(--route-halo)" strokeWidth={R.w + 3} strokeLinecap="round" />
         <line x1="2" y1="6" x2="30" y2="6" stroke={routeColor(o.id, recId)} strokeWidth={R.w} strokeDasharray={R.dash || undefined} strokeLinecap="round" />
@@ -195,6 +197,7 @@ function OptionRow({ o, res }: { o: TripOption; res: PlanOk }) {
         {!isPlan && (
           <span style={{ display: 'flex', alignItems: 'center', gap: 10, maxWidth: 300 }}>
             <span style={{ flex: 1 }}><Meter colors={segs(res.reliable && !gone ? p || 0 : 0, rel)} /></span>
+            {p != null && <span className="sr-only">{pTxt} chance it is lower than your plan</span>}
             <span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-tertiary)', whiteSpace: 'nowrap' }}>{!res.reliable ? 'not reliably different' : gone ? 'already left' : ` `}</span>
           </span>
         )}

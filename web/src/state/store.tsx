@@ -4,7 +4,8 @@ import {
   CITIES, DEMO_EXAMPLE, PLACES, PLAN_ERRORS, POLL, toMin,
   type Band, type BuildingKey, type City, type LatLng, type MeKey, type ModeKey, type Place, type PlanOk, type PlanResult, type PollKey, type RouteId, type TripOption,
 } from '../data/sora';
-import { ApiError, api, type DayView } from '../api/client';
+import { ApiError, api, onSaved, type DayView } from '../api/client';
+import { clearDevice, disablePush, enablePush, pushOn, saveTripContext, scheduleWake } from '../lib/device';
 import type { ApiEvent, Change, CounterfactualResponse, DayRequest, Example, Field, PlanRequest } from '../api/types';
 import { fieldSeries, planDay0 } from '../lib/field';
 import { HOUR_MS, IST_MS, hourIndex, istHHMM, istTimeOnOrAfter } from '../lib/time';
@@ -46,7 +47,11 @@ export type State = {
   fields: Partial<Record<PollKey, Field | 'unavailable'>>;
   events: ApiEvent[]; day: DayView | null; whatif: WhatIf[];
   dayStops: DayStop[]; toast: string | null;
+  savedAt: string | null;  // offline: the forecast on screen is the copy the service worker saved at this time
+  notif: { alerts: boolean; proactive: boolean; push: boolean };
 };
+/** Spec §28.2 thresholds: notify only for ≥15% expected reduction with ≥80% chance it helps (same as public/sw.js). */
+export const PROACTIVE = { rMin: 15, cMin: 0.8 };
 
 const store = {
   get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
@@ -103,14 +108,16 @@ function initialState(): State {
     prefs: { mode: 'car_ac', bld: 'naturally_ventilated', extra: 15 },
     sub: { live: 'overview', trip: 'options', day: 'result' },
     cities: CITIES, reload: 0, places: PLACES, example: null, fields: {}, events: [], day: null, whatif: [],
-    toast: null,
+    toast: null, savedAt: null,
+    notif: { alerts: false, proactive: false, ...readJSON<{ alerts: boolean; proactive: boolean }>('sora.notif'), push: pushOn() },
   };
 }
 
 /* ---------- on-device storage for reminders and "notify me" (spec §40: nothing here leaves the device) ---------- */
-type Reminder = { at: string; title: string; body: string };
+type Reminder = { id: string; at: string; title: string; body: string };
 const readList = <T,>(k: string): T[] => { try { return JSON.parse(store.get(k) || '[]') as T[]; } catch { return []; } };
-const DEVICE_KEYS = ['sora.reminders', 'sora.notify', 'sora.days'];
+function readJSON<T>(k: string): Partial<T> { try { return JSON.parse(store.get(k) || '{}') as Partial<T>; } catch { return {}; } }
+const DEVICE_KEYS = ['sora.reminders', 'sora.notify', 'sora.days', 'sora.notif', 'sora.proactive'];
 export const readDays = () => readList<DayRecord>('sora.days');
 const KEEP_DAYS = 30;
 
@@ -131,7 +138,8 @@ function schedule(r: Reminder) {
   const ms = Date.parse(r.at) - Date.now();
   if (ms <= 0 || ms > 86400e3) return;
   setTimeout(() => {
-    if ('Notification' in window && Notification.permission === 'granted') new Notification(r.title, { body: r.body });
+    /* same tag as the service worker's push copy, so a reminder never shows twice */
+    if ('Notification' in window && Notification.permission === 'granted') new Notification(r.title, { body: r.body, tag: 'reminder-' + r.id });
   }, ms);
 }
 
@@ -255,17 +263,22 @@ function useSoraStore() {
         try { res = applyDemoToPlan(ref.current, await api.plan(req)); }
         catch (e) {
           if (id !== seq.current.plan) return;
-          if (isOffline(e)) { set({ planning: false, offline: true }); return; }
-          const a = e as ApiError, known = PLAN_ERRORS.find((c) => c === a.code);
-          res = { error: known ?? 'invalid', message: a.message, fastest: a.extra.fastest_min as number | undefined };
+          /* showing a saved forecast offline: say planning needs a connection instead of blocking the map */
+          if (isOffline(e) && ref.current.savedAt) res = { error: 'offline', message: "You're offline. Planning needs a connection; the map shows the last saved forecast." };
+          else if (isOffline(e)) { set({ planning: false, offline: true }); return; }
+          else {
+            const a = e as ApiError, known = PLAN_ERRORS.find((c) => c === a.code);
+            res = { error: known ?? 'invalid', message: a.message, fastest: a.extra.fastest_min as number | undefined };
+          }
         }
       }
       if (id !== seq.current.plan) return;
       const sel = (!res.error && res.recommended) || 'B';
       set({ res, planning: false, sel });
       if (!res.error && jump !== false) jumpTo([res.baseline, ...res.options].find((o) => o.id === sel));
+      if (!res.error) proactive(ref.current, res);
     }, 200);
-  }, [set, jumpTo]);
+  }, [set, jumpTo]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const askWhatIf = useCallback(async () => {
     const id = ++seq.current.whatif, s = ref.current, F = s.fields.pm25;
@@ -297,19 +310,51 @@ function useSoraStore() {
       saveDay(s.city, new Date(planDay0(F) + IST_MS).toISOString().slice(0, 10), day, s.dayStops, s.prefs.mode); // IST date
     }
     catch (e) {
-      set({ dayBusy: false, ...(isOffline(e) ? { offline: true } : {}) });
-      if (!isOffline(e)) notify((e as ApiError).message);
+      const saved = isOffline(e) && !!ref.current.savedAt; // offline on a saved forecast: keep the map, explain
+      set({ dayBusy: false, ...(isOffline(e) && !saved ? { offline: true } : {}) });
+      if (!isOffline(e) || saved) notify(saved ? "You're offline. Planning your day needs a connection." : (e as ApiError).message);
     }
   }, [set, notify]);
 
-  /** Save an on-device reminder and ask for notification permission. */
-  const remind = useCallback(async (r: Reminder) => {
+  /** Save an on-device reminder. With push on it also arrives when Sora is closed (the server only gets a wake-up time). */
+  const remind = useCallback(async (input: Omit<Reminder, 'id'> & { id?: string }) => {
+    const r: Reminder = { id: input.id ?? 'r' + Date.now().toString(36), at: input.at, title: input.title, body: input.body };
     if ('Notification' in window && Notification.permission === 'default') { try { await Notification.requestPermission(); } catch { /* blocked */ } }
     store.set('sora.reminders', JSON.stringify([...readList<Reminder>('sora.reminders'), r]));
     schedule(r);
+    const pushed = await scheduleWake(r.id, r.at, r.title, r.body);
     const denied = !('Notification' in window) || Notification.permission === 'denied';
-    notify(`Reminder set for ${istHHMM(r.at)}.` + (denied ? ' Notifications are blocked in this browser, so check back then.' : ' It arrives while Sora is open in a tab.'));
+    notify(`Reminder set for ${istHHMM(r.at)}.` + (denied ? ' Notifications are blocked in this browser, so check back then.'
+      : pushed ? ' It arrives even when Sora is closed.' : ' It arrives while Sora is open in a tab; turn on notifications in settings to get it when Sora is closed.'));
   }, [notify]);
+
+  /** Spec §28.2 on this device: for the saved trip, one suggestion a day when it is clearly and confidently better. */
+  const proactive = useCallback((s: State, res: PlanOk) => {
+    const rec = res.options.find((o) => o.id === res.recommended), t = s.trip, o = placeLL(s, t.origin), d = placeLL(s, t.dest);
+    if (o && d) saveTripContext({ city: s.city, origin: o, dest: d, mode: t.mode, dep: t.dep, win: +t.win, maxExtra: t.maxExtra, ob: t.ob, db: t.db, destName: placeOf(t.dest)?.name ?? 'your destination', proactive: s.notif.proactive });
+    if (!s.notif.proactive || !res.reliable || !rec?.departure_iso || rec.departure === res.baseline.departure && rec.extra_min >= 0) return;
+    if (rec.reduction_pct.median < PROACTIVE.rMin || (rec.p_better ?? 0) < PROACTIVE.cMin) return;
+    const at = Date.parse(rec.departure_iso) - 15 * 60e3, today = new Date(Date.now() + IST_MS).toISOString().slice(0, 10);
+    if (at < Date.now() + 5 * 60e3 || store.get('sora.proactive') === today) return;
+    store.set('sora.proactive', today);
+    remind({ id: 'p' + today.replace(/-/g, ''), at: new Date(at).toISOString(), title: `Leave at ${rec.departure} for ${placeOf(t.dest)?.name ?? 'your destination'}`,
+      body: `About ${rec.reduction_pct.median}% less exposure than leaving at ${t.dep} (${Math.round((rec.p_better ?? 0) * 100)}% chance it helps).` });
+  }, [remind]);
+
+  /** Notifications: city alerts and proactive suggestions, both off by default (spec §28). Push is enabled on first use. */
+  const setNotif = useCallback(async (p: Partial<State['notif']>) => {
+    const next = { ...ref.current.notif, ...p };
+    if (next.alerts || next.proactive) {
+      const r = await enablePush(ref.current.city, next.alerts);
+      if (r !== 'on') {
+        notify(r === 'denied' ? 'Notifications are blocked for Sora in this browser. Allow them in the site settings, then try again.'
+          : r === 'unsupported' ? "This browser can't show notifications from Sora." : "Couldn't turn notifications on. Try again later.");
+        return;
+      }
+    } else await disablePush();
+    store.set('sora.notif', JSON.stringify({ alerts: next.alerts, proactive: next.proactive }));
+    set({ notif: { ...next, push: pushOn() } });
+  }, [set, notify]);
 
   const notifyWhenLive = useCallback((key: string) => {
     store.set('sora.notify', JSON.stringify([...new Set([...readList<string>('sora.notify'), key])]));
@@ -318,8 +363,9 @@ function useSoraStore() {
 
   const clearHistory = useCallback(() => {
     DEVICE_KEYS.forEach((k) => { try { localStorage.removeItem(k); } catch { /* private mode */ } });
-    set({ menuOpen: false });
-    notify('History on this device deleted: planned days, reminders and saved notices.');
+    clearDevice(); // push subscription, reminder texts and the saved trip in the service worker's storage
+    set({ menuOpen: false, notif: { alerts: false, proactive: false, push: false } });
+    notify('History on this device deleted: planned days, reminders, notifications and saved notices.');
   }, [set, notify]);
 
   const selectOpt = useCallback((id: RouteId) => {
@@ -368,6 +414,7 @@ function useSoraStore() {
       }
     }, () => { /* keep the static list; field load reports offline */ });
     readList<Reminder>('sora.reminders').forEach(schedule);
+    const unSaved = onSaved((savedAt) => set({ savedAt }));
     const onR = () => set({ w: window.innerWidth, h: window.innerHeight });
     const onK = (e: KeyboardEvent) => {
       if (e.key === 'Escape') set({ cityOpen: false, menuOpen: false, searchOpen: false, layersOpen: false, pt: null, pick: null });
@@ -380,8 +427,13 @@ function useSoraStore() {
       const s = ref.current, F = activeField(s);
       if (s.playing && F && !document.hidden) set({ t: (s.t + 1) % F.times.length });
     }, rm ? 1500 : 700);
-    return () => { clearInterval(iv); window.removeEventListener('resize', onR); window.removeEventListener('keydown', onK); };
+    return () => { clearInterval(iv); unSaved(); window.removeEventListener('resize', onR); window.removeEventListener('keydown', onK); };
   }, [set, rm, openSearch, notify]);
+
+  /* city alerts follow the city on screen (permission is already granted, so no prompt) */
+  useEffect(() => {
+    if (ref.current.notif.alerts && pushOn()) enablePush(st.city, true);
+  }, [st.city]);
 
   /* city (or retry): PM2.5 field first, then plan, events, day and the other pollutants */
   useEffect(() => {
@@ -420,7 +472,7 @@ function useSoraStore() {
 
   return {
     st, set, ref, mapRef, searchElRef, rm, runPlan, askWhatIf, loadDay, selectOpt, setTrip, applyDemo, toggleTheme, finishOnboarding, flyTo, openSearch,
-    notify, remind, notifyWhenLive, clearHistory, addPlace,
+    notify, remind, notifyWhenLive, clearHistory, addPlace, setNotif,
   };
 }
 

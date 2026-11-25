@@ -4,6 +4,7 @@ import './design/tokens.css';
 import './styles/app.css';
 import { SoraProvider } from './state/store';
 import App from './App';
+import { registerSW } from './lib/device';
 import Landing from './landing/Landing';
 const Styleguide = lazy(() => import('./styleguide/Styleguide')); // internal page; kept out of the main bundle
 
@@ -11,6 +12,8 @@ const Styleguide = lazy(() => import('./styleguide/Styleguide')); // internal pa
 const route = /^\/app\/?$/.test(location.pathname) ? 'app' : /^\/styleguide\/?$/.test(location.pathname) ? 'styleguide' : 'landing';
 document.documentElement.classList.add('route-' + route);
 if (route === 'app') document.title = 'sora — map';
+
+registerSW(); // offline app + notifications (public/sw.js)
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

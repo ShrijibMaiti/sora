@@ -188,3 +188,5 @@ button.chip:hover{color:var(--text-primary)}
 .btn-text:hover{color:var(--text-primary)}
 .card{background:var(--surface-base);border:1px solid var(--border-default);border-radius:var(--radius-xl)}
 .card-title{font-size:var(--fs-lede);font-weight:400;letter-spacing:-.015em}
+/* text for screen readers only (e.g. what a meter shows) */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}

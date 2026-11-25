@@ -68,7 +68,7 @@ export function Insights({ L }: { L: Layout }) {
   const range = n ? (n === 1 ? dayLabel(days[0].date) : `${dayLabel(days[0].date)} – ${dayLabel(latest.date)}`) : '';
 
   return (
-    <section aria-label="Insights" className="noscroll" style={{ position: 'absolute', inset: L.insInset, borderRadius: L.insRadius, border: '1px solid var(--border-default)', boxShadow: 'var(--shadow-overlay)', zIndex: 1100, background: 'var(--bg-canvas)', overflowY: 'auto' }}>
+    <section aria-label="Insights" className="noscroll" tabIndex={0} style={{ position: 'absolute', inset: L.insInset, borderRadius: L.insRadius, border: '1px solid var(--border-default)', boxShadow: 'var(--shadow-overlay)', zIndex: 1100, background: 'var(--bg-canvas)', overflowY: 'auto' }}>
       <div style={{ maxWidth: 1280, margin: '0 auto', padding: L.insPad, display: 'flex', flexDirection: 'column', gap: 56 }}>
         {/* answer-first, like the panels: the history's result is the heading */}
         <header className="stack g12" style={{ maxWidth: 760 }}>

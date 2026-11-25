@@ -209,7 +209,7 @@ export type PlanOk = {
   front?: FrontPoint[]; robustness?: { margin_pct: number; where: string; unmonitored: boolean } | null;
 };
 /** error = API error code (docs/api_contract.md) or 'missing' when the form lacks a start/destination. */
-export const PLAN_ERRORS = ['missing', 'invalid', 'outside', 'no_route', 'no_feasible', 'beyond_horizon', 'not_built'] as const;
+export const PLAN_ERRORS = ['missing', 'invalid', 'outside', 'no_route', 'no_feasible', 'beyond_horizon', 'not_built', 'offline'] as const;
 export type PlanErr = { error: (typeof PLAN_ERRORS)[number]; message?: string; fastest?: number };
 export type PlanResult = PlanOk | PlanErr;
 

@@ -3,7 +3,7 @@
     pip install -e ".[e2e]" && playwright install chromium
     python scripts/smoke.py http://localhost:8000 [screenshot_dir]
 
-Needs live data (Open-Meteo, OSM), so it is a release check, not a CI test. Exits 1 on any failure.
+Run against a real deployment as a release check, or against `SORA_FAKE_DATA=1` (as CI does). Exits 1 on any failure.
 """
 import sys
 import urllib.request
@@ -50,6 +50,19 @@ with sync_playwright() as p:
         if SHOTS:
             SHOTS.mkdir(parents=True, exist_ok=True)
             pg.screenshot(path=str(SHOTS / f"{tab.replace(' ', '').lower()}.png"))
+
+    # installable app: service worker in control, then offline the app opens on the saved forecast and says so
+    check(pg.evaluate("fetch('/manifest.webmanifest').then(r => r.ok)"), "web app manifest is served")
+    pg.evaluate("navigator.serviceWorker.ready")
+    pg.reload()
+    pg.wait_for_load_state("networkidle", timeout=60000)
+    check(pg.evaluate("!!navigator.serviceWorker.controller"), "service worker controls the app")
+    pg.context.set_offline(True)
+    pg.reload()
+    pg.wait_for_timeout(3000)
+    body = pg.inner_text("body")
+    check("You're offline" in body and "Can't reach" not in body, "offline: app opens on the saved forecast")
+    pg.context.set_offline(False)
     b.close()
 
 for name in ("cities", "places", "field", "events", "plan", "day", "counterfactual"):

@@ -68,6 +68,13 @@ def _prob(start_h):
     return 0.8 if start_h < 24 else 0.65 if start_h < 48 else 0.5
 
 
+def for_city(key: str, built: dict, center) -> list[dict]:
+    """Every alert for a city from one forecast build (GET /api/events and push alerts use this)."""
+    from . import calendar
+    found = from_forecast(built["met"], built["field"]["fires"], center) + calendar.upcoming(key, built["met"]["times"])
+    return sorted(found, key=lambda e: e["start"])
+
+
 def from_forecast(met: dict, fires=(), center=None) -> list[dict]:
     """Contract ApiEvent list from city-mean hourly met (keys as in field.forecast.build), soonest first.
     `fires` ([lat, lon] detections) and the city `center` enable the upwind-smoke alert."""

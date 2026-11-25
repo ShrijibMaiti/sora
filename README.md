@@ -24,8 +24,10 @@ and day plans that lower your dose, with an honest confidence for each suggestio
 | Day planning | Whole-day schedule (07:00–23:00): alternative places and departure shifts within your extra-travel budget, scored on the same risk-aware dose (spec §25). |
 | What if | Leave later, change mode, change destination / building, stay in during the peak, with the building's lag in the reasoning (spec §26). |
 | Places | Featured places and an example trip and day per city; search over ~2,500 OSM neighbourhoods, stations, destinations and roads, served by Sora's own API. |
-| Web app | Landing page, map app (Live, Trip, Day, What if, Insights), `/styleguide`. Insights shows the days you planned, kept on your device only. |
-| Ops | One process serves API + app, gzip, `/api/health`, Docker image, CI, browser smoke test. |
+| Web app | Landing page, map app (Live, Trip, Day, What if, Insights), `/styleguide`. Insights shows the days you planned, kept on your device only. WCAG 2.1 AA clean (axe) on every screen, dark and light, desktop and phone. |
+| Installable + offline | Web app manifest and service worker (`web/public/sw.js`): installable, works offline on the last saved forecast and says so; trip and day planning need a connection. |
+| Notifications | Opt-in, in settings: alerts for the city (smoke, stagnant air, festivals) and suggestions for your saved trip (spec §28.2: ≥15% lower, ≥80% likely, at most one a day), delivered by Web Push even when Sora is closed. Reminder texts and your trip stay on the device; the server keeps only where to push and when (`sora/push.py`). |
+| Ops | One process serves API + app, gzip, security headers (CSP with hashed inline script, no framing), per-IP rate limits, `/api/health`, `/api/metrics` (Prometheus), Docker image. CI runs backend tests, the web build, the Docker build, and the browser smoke and accessibility tests on synthetic data (`SORA_FAKE_DATA=1`). |
 
 Placeholders (empty files in the tree below): the T0 field model (station ML + LUR), physics, neural operator, GNNs,
 generative uncertainty, simulators, mobility inference, personal twin, baselines and evaluation.
@@ -68,8 +70,22 @@ while every live city has a field to serve, and the image's HEALTHCHECK uses it.
 | `SORA_CACHE` | `data_cache/` (`/data` in Docker) | OSM road graph and place-name cache |
 | `SORA_WEB_DIST` | `web/dist` | Built web app to serve; nothing is served if the folder is missing |
 | `SORA_LOG_LEVEL` | `INFO` | Python log level |
+| `SORA_VAPID_SUBJECT` | `mailto:push@sora.invalid` | Contact the push services see (VAPID `sub`): set your site URL or a contact address in production. The key pair is created in `SORA_CACHE` on first use; keep that folder |
+| `SORA_TRUST_PROXY` | unset | `1` behind a reverse proxy: rate limits use `X-Forwarded-For`, HSTS follows `X-Forwarded-Proto` |
+| `SORA_METRICS_TOKEN` | unset | If set, `/api/metrics` needs `Authorization: Bearer <token>` |
+| `SORA_RATE_LIMIT` | on | `off` disables rate limits (tests) |
+| `SORA_FAKE_DATA` | unset | `1` serves synthetic, deterministic data with no network (CI browser tests) |
 
-CI (`.github/workflows/ci.yml`) runs the backend tests, the web typecheck and build, and the Docker build.
+CI (`.github/workflows/ci.yml`): backend tests, web typecheck and build, Docker build, and an `e2e` job that serves the
+built app on synthetic data and runs `scripts/smoke.py` (every screen + offline) and `scripts/a11y.py` (WCAG 2.1 AA).
+
+### Hosting
+
+Any container host works: run the image with a persistent volume on `/data` (road graphs, place index, push store,
+VAPID key) and HTTPS in front (service workers and push need it). Set `SORA_VAPID_SUBJECT`, `SORA_TRUST_PROXY=1`
+behind a proxy, optionally `OPENAQ_API_KEY`, `FIRMS_MAP_KEY` and `SORA_METRICS_TOKEN`. One instance: the push store and
+caches are local files, so scaling out needs a shared store first. Before a public launch, move map tiles from
+tile.openstreetmap.org (light use only) to a keyed tile provider and add it to the CSP in `sora/api/middleware.py`.
 
 ## API
 
@@ -111,6 +127,8 @@ sora/
 │   ├── config.py                     ● cities, featured places, example trip/day, constants   §3.3
 │   ├── geo.py                        ● distances, projections
 │   ├── pipeline.py                   ● hourly refresh of field, road graph, place index       §18.2
+│   ├── push.py                       ● Web Push store and sender (wake-ups, city alerts)      §28
+│   ├── fake.py                       ● synthetic data for tests and SORA_FAKE_DATA=1
 │   │
 │   ├── data/                         L1 ingestion                                              §11
 │   │   ├── openmeteo.py              ● CAMS PM2.5 + ERA5/IFS met (point API)                    T0
@@ -170,20 +188,23 @@ sora/
 │   ├── baselines/ · eval/            B0–B3, metrics, splits, ablations                         §34–37
 │   │
 │   └── api/                          FastAPI                                                   §41.2
-│       ├── main.py                   ● app, errors, gzip, /health, serves web/dist, hourly pipeline
+│       ├── main.py                   ● app, errors, /health, /metrics, serves web/dist, pipeline + push loops
+│       ├── middleware.py             ● security headers (CSP), rate limits, metrics
 │       ├── schemas.py                ● request models, contract errors
-│       └── routes/field.py · events.py · plan.py · places.py   ● (counterfactual.py: placeholder, lives in plan.py)
+│       └── routes/field.py · events.py · plan.py · places.py · push.py   ● (counterfactual.py: placeholder)
 │
 ├── scripts/
-│   ├── smoke.py                      ● end-to-end browser check of a running deployment
+│   ├── smoke.py                      ● end-to-end browser check: every screen, offline mode
+│   ├── a11y.py                       ● WCAG 2.1 AA audit (axe-core), dark/light, desktop/phone
 │   └── build_city.py · run_simulations.py · train_operator.py · train_street_gnn.py · run_baselines.py · run_ablations.py
 │
-├── tests/                            ● synthetic data and a synthetic street grid, no network
-│   ├── conftest.py · test_api.py · test_decision.py · test_pipeline.py · test_places.py
-│   └── test_{qc,aqi,physics,operator,uncertainty,dose}.py   placeholders
+├── tests/                            ● synthetic data (sora/fake.py), no network
+│   ├── conftest.py · test_api.py · test_decision.py · test_pipeline.py · test_places.py · test_dose.py · test_ops.py
+│   └── test_{qc,aqi,physics,operator,uncertainty}.py   placeholders
 │
 └── web/                              ── Frontend (Vite + React 18 + TypeScript + Leaflet) ──
-    ├── package.json · tsconfig.json · vite.config.ts · index.html · scripts/spa-routes.mjs
+    ├── package.json · tsconfig.json · vite.config.ts · index.html · scripts/spa-routes.mjs · scripts/make_icons.py
+    ├── public/sw.js · manifest.webmanifest · icons/   service worker (offline, push), install manifest
     ├── DESIGN.md · README.md
     └── src/
         ├── main.tsx · App.tsx                         "/" landing, "/app" application, "/styleguide"
@@ -195,6 +216,7 @@ sora/
         ├── data/sora.ts                               UI constants (AQI, modes, routes) + Delhi demo data and model
         │                                              behind the mock and the fail-safes
         ├── lib/field.ts · time.ts · layout.ts         field sampling, IST times, layout geometry
+        ├── lib/device.ts                              service worker, on-device storage, Web Push
         ├── styleguide/Styleguide.tsx                  design system page
         └── components/
             ├── Chrome.tsx · MapView.tsx · MapChrome.tsx · SidePanel.tsx · Overlays.tsx · Icon.tsx
