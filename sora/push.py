@@ -1,6 +1,6 @@
 """Web Push: reminders (including proactive suggestions, spec §28.2) and event alerts (§28.3), personal content on the device.
 
-The server stores only a push address, the city (for alerts) and wake-up times. A reminder push carries no text: it wakes
+The server stores (in SQLite, push.db) only a push address, the city (for alerts) and wake-up times. A reminder push carries no text: it wakes
 the service worker, which reads the text from the device's own storage (spec §40, §41.3). Alerts are city-wide and
 public, so they carry their text. Every push shows a notification (browsers require it), so the device only asks for a
 wake-up when it has something to say.
@@ -10,7 +10,9 @@ import hashlib
 import json
 import logging
 import os
+import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
@@ -29,7 +31,6 @@ MAX_SUBS, MAX_WAKES, WAKE_AHEAD = 10_000, 50, timedelta(days=7)
 ALERT_AHEAD = timedelta(hours=12)
 TICK_S = 30
 
-_lock = threading.Lock()
 _vapid: Vapid01 | None = None
 
 
@@ -42,11 +43,18 @@ def _vapid_key() -> Vapid01:
     global _vapid
     if _vapid is None:
         path = _file("vapid_private.pem")
-        if not path.exists():
+        if not path.exists():  # several workers may start together: the first link wins, the rest read it
             path.parent.mkdir(parents=True, exist_ok=True)
             v = Vapid01()
             v.generate_keys()
-            v.save_key(str(path))
+            tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+            tmp.write_bytes(v.private_pem())
+            try:
+                os.link(tmp, path)
+            except FileExistsError:
+                pass
+            finally:
+                tmp.unlink()
         _vapid = Vapid01.from_file(str(path))
     return _vapid
 
@@ -66,89 +74,105 @@ def sid_of(endpoint: str) -> str:
     return hashlib.sha256(endpoint.encode()).hexdigest()[:20]
 
 
-def _load() -> dict:
-    try:
-        return json.loads(_file("push.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS subs (sid TEXT PRIMARY KEY, sub TEXT NOT NULL, city TEXT, alerts INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS wakes (sid TEXT NOT NULL REFERENCES subs ON DELETE CASCADE, id TEXT NOT NULL, at TEXT NOT NULL,
+                                  PRIMARY KEY (sid, id));
+CREATE INDEX IF NOT EXISTS wakes_at ON wakes (at);
+CREATE TABLE IF NOT EXISTS sent (sid TEXT NOT NULL REFERENCES subs ON DELETE CASCADE, key TEXT NOT NULL, at TEXT NOT NULL,
+                                 PRIMARY KEY (sid, key));
+"""
 
 
-def _save(subs: dict):
-    path = _file("push.json")
+@contextmanager
+def _tx():
+    """One write transaction on push.db. BEGIN IMMEDIATE takes the write lock up front, so several server workers on
+    one host never claim the same wake or alert twice (shortcut: one host's disk; use Postgres to scale out)."""
+    path = _file("push.db")
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(subs), encoding="utf-8")
-    tmp.replace(path)  # atomic: a crash never leaves half a file
+    db = sqlite3.connect(path, timeout=15, isolation_level=None)
+    try:
+        db.execute("PRAGMA foreign_keys = ON")
+        db.execute("PRAGMA journal_mode = WAL")
+        db.executescript(SCHEMA)
+        db.execute("BEGIN IMMEDIATE")
+        try:
+            yield db
+            db.execute("COMMIT")
+        except BaseException:
+            db.execute("ROLLBACK")
+            raise
+    finally:
+        db.close()
 
 
 def upsert(sub: dict, city: str | None, alerts: bool) -> str:
     sid = sid_of(sub["endpoint"])
-    with _lock:
-        subs = _load()
-        if sid not in subs and len(subs) >= MAX_SUBS:
+    with _tx() as db:
+        known = db.execute("SELECT 1 FROM subs WHERE sid = ?", (sid,)).fetchone()
+        if not known and db.execute("SELECT COUNT(*) FROM subs").fetchone()[0] >= MAX_SUBS:
             raise OverflowError("too many subscriptions")
-        old = subs.get(sid, {})
-        subs[sid] = {"sub": sub, "city": city, "alerts": alerts, "wakes": old.get("wakes", []), "sent": old.get("sent", [])}
-        _save(subs)
+        db.execute("INSERT INTO subs VALUES (?, ?, ?, ?) ON CONFLICT (sid) DO UPDATE SET sub = excluded.sub, "
+                   "city = excluded.city, alerts = excluded.alerts", (sid, json.dumps(sub), city, int(alerts)))
     return sid
+
+
+def _ts(at: datetime) -> str:
+    return at.astimezone(timezone.utc).isoformat(timespec="seconds")  # one format, so text order is time order
 
 
 def add_wake(sid: str, wid: str, at: datetime) -> bool:
     now = datetime.now(timezone.utc)
     if not now - timedelta(minutes=1) <= at <= now + WAKE_AHEAD:
         raise ValueError("wake time must be within the next 7 days")
-    with _lock:
-        subs = _load()
-        if sid not in subs:
+    with _tx() as db:
+        if not db.execute("SELECT 1 FROM subs WHERE sid = ?", (sid,)).fetchone():
             return False
-        wakes = [w for w in subs[sid]["wakes"] if w["id"] != wid] + [{"id": wid, "at": at.astimezone(timezone.utc).isoformat()}]
-        subs[sid]["wakes"] = sorted(wakes, key=lambda w: w["at"])[-MAX_WAKES:]
-        _save(subs)
+        db.execute("INSERT OR REPLACE INTO wakes VALUES (?, ?, ?)", (sid, wid, _ts(at)))
+        db.execute("DELETE FROM wakes WHERE sid = ? AND id NOT IN "
+                   "(SELECT id FROM wakes WHERE sid = ? ORDER BY at DESC LIMIT ?)", (sid, sid, MAX_WAKES))
     return True
 
 
 def remove(sid: str) -> bool:
-    with _lock:
-        subs = _load()
-        found = subs.pop(sid, None) is not None
-        _save(subs)
-    return found
+    with _tx() as db:
+        return db.execute("DELETE FROM subs WHERE sid = ?", (sid,)).rowcount > 0
 
 
 def due(now: datetime, events_for) -> list[tuple[str, dict]]:
-    """(sid, payload) to send now; marks them as sent. `events_for(city)` → that city's current events."""
+    """(sid, payload) to send now, claimed atomically: each wake and alert goes to exactly one worker, once.
+    `events_for(city)` → that city's current events (fetched before taking the lock)."""
+    with _tx() as db:
+        cities = [c for (c,) in db.execute("SELECT DISTINCT city FROM subs WHERE alerts AND city IS NOT NULL")]
+    warn = {}
+    for c in cities:
+        warn[c] = [e for e in events_for(c) if e["severity"] == "warning"
+                   and datetime.fromisoformat(e["start"].replace("Z", "+00:00")) - now <= ALERT_AHEAD]
     out = []
-    city_events = {}
-    with _lock:
-        subs = _load()
-        for sid, s in subs.items():
-            keep = []
-            for w in s["wakes"]:
-                if datetime.fromisoformat(w["at"]) <= now:
-                    out.append((sid, {"type": "wake", "id": w["id"]}))
-                else:
-                    keep.append(w)
-            s["wakes"] = keep
-            if s.get("alerts") and s.get("city"):
-                if s["city"] not in city_events:
-                    city_events[s["city"]] = events_for(s["city"])
-                for e in city_events[s["city"]]:
-                    key = f"{s['city']}:{e['kind']}:{e['start']}"
-                    start = datetime.fromisoformat(e["start"].replace("Z", "+00:00"))
-                    if e["severity"] == "warning" and key not in s["sent"] and start - now <= ALERT_AHEAD:
-                        s["sent"] = (s["sent"] + [key])[-100:]
-                        out.append((sid, {"type": "alert", "title": e["title"], "body": e["body"], "tag": key}))
-        _save(subs)
+    with _tx() as db:
+        for sid, wid in db.execute("DELETE FROM wakes WHERE at <= ? RETURNING sid, id", (_ts(now),)).fetchall():
+            out.append((sid, {"type": "wake", "id": wid}))
+        for sid, city in db.execute("SELECT sid, city FROM subs WHERE alerts AND city IS NOT NULL").fetchall():
+            for e in warn.get(city, []):
+                key = f"{city}:{e['kind']}:{e['start']}"
+                if db.execute("INSERT OR IGNORE INTO sent VALUES (?, ?, ?)", (sid, key, _ts(now))).rowcount:
+                    out.append((sid, {"type": "alert", "title": e["title"], "body": e["body"], "tag": key}))
+        db.execute("DELETE FROM sent WHERE at < ?", (_ts(now - timedelta(days=30)),))  # events are days long at most
     return out
 
 
+def subscription(sid: str) -> dict | None:
+    with _tx() as db:
+        row = db.execute("SELECT sub FROM subs WHERE sid = ?", (sid,)).fetchone()
+    return json.loads(row[0]) if row else None
+
+
 def send(sid: str, payload: dict) -> bool:
-    with _lock:
-        rec = _load().get(sid)
-    if not rec:
+    sub = subscription(sid)
+    if not sub:
         return False
     try:
-        webpush(subscription_info=rec["sub"], data=json.dumps(payload), vapid_private_key=_vapid_key(),
+        webpush(subscription_info=sub, data=json.dumps(payload), vapid_private_key=_vapid_key(),
                 vapid_claims={"sub": SUBJECT}, ttl=3600, timeout=10)
         return True
     except WebPushException as e:

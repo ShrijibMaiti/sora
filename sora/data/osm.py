@@ -65,6 +65,12 @@ def load_places(path):
     return out
 
 
+def fetch_transit(bbox, path):
+    """Metro / light-rail / monorail route relations with their ordered stop nodes (spec §23.6, metro on real lines)."""
+    s, w, n, e = bbox
+    _query(f'[out:json][timeout:180];rel[route~"^(subway|light_rail|monorail)$"]({s},{w},{n},{e});out body;node(r);out;', path)
+
+
 def load_graph(path):
     """Directed graph; every street has both directions, with motor_ok False against a one-way."""
     G = nx.DiGraph()

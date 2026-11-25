@@ -1,4 +1,4 @@
-import { AQI, DEGRADE, POLL, cat, inBbox } from '../../data/sora';
+import { AQI, DEGRADE, POLL, cat, degradeOf, inBbox } from '../../data/sora';
 import { activeField, cityOf, useSora } from '../../state/store';
 import { dayTicks, useSeries } from '../MapChrome';
 import { fmtCoords, pointText } from '../MapView';
@@ -23,7 +23,7 @@ export function LivePanel() {
   const peakT = ser.reduce((b, s, i) => (i < 24 && s.median > ser[b].median ? i : b), 0);
   const sub = st.sub.live;
   const m = F.meta, degraded = st.demo === 'degraded', ratio = m.n_reporting / Math.max(1, m.n_stations);
-  const lv = degraded ? DEGRADE[5] : DEGRADE.find((d) => d.l === m.degradation) ?? DEGRADE[7]; // same lookup as the map's data chip
+  const lv = degraded ? DEGRADE[2] : degradeOf(m.degradation); // same lookup as the map's data chip
   const health: [string, string, string][] = [
     ['Stations', degraded ? `0 of ${m.n_stations} reporting` : `${m.n_reporting} of ${m.n_stations} reporting`, degraded || ratio < 0.5 ? 'var(--danger)' : ratio < 0.9 ? 'var(--warning)' : 'var(--success)'],
     ['Regional forecast', m.background, 'var(--success)'],

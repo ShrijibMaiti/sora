@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AQI, BP, DEGRADE, POLL, UNC, aqiIndex, cat, type Place } from '../data/sora';
+import { AQI, BP, DEGRADE, OFFLINE, POLL, UNC, aqiIndex, cat, degradeOf, type Place } from '../data/sora';
 import { api } from '../api/client';
 import { activeField, cityOf, useSora } from '../state/store';
 import { fieldMean, fieldSeries, fieldTime, lastHour, relDay } from '../lib/field';
@@ -25,7 +25,7 @@ export function FloatTop({ L }: { L: Layout }) {
   const results = !q ? st.places.slice(0, 5) : remote?.q === q ? remote.list : local;
   const F = activeField(st), meta = F?.meta;
   const P = POLL.find((p) => p.k === (F?.pollutant ?? st.poll))!;
-  const degr = st.demo === 'degraded' ? DEGRADE[5] : st.offline || !meta ? DEGRADE[7] : DEGRADE.find((d) => d.l === meta.degradation) || DEGRADE[7];
+  const degr = st.demo === 'degraded' ? DEGRADE[2] : st.offline || !meta ? OFFLINE : degradeOf(meta.degradation);
   const cm = F ? fieldMean(F, st.t) : null, ca = cm ? AQI[cat(cm.median, P.k)] : null;
   const updated = meta ? istHHMM(meta.analysis_time) + ' IST' : '—';
   const forecast = L.mob ? updated : st.offline ? `Last forecast ${updated} · reconnecting` : meta ? `Forecast updated ${updated} · next update ${istHHMM(meta.next_update)}` : 'Loading forecast…';
@@ -34,7 +34,7 @@ export function FloatTop({ L }: { L: Layout }) {
   const alertEvent = st.events.find((e) => e.severity === 'warning');
   const savedTime = st.savedAt && !Number.isNaN(Date.parse(st.savedAt)) ? `${relDay(st.savedAt, new Date().toISOString())} ${istHHMM(st.savedAt)}` : 'earlier';
   const banner = degraded
-    ? { icon: 'satellite', text: "Satellite data only: treat advice as indicative. Ground stations haven't reported since 11:00.", c: 'var(--warning)', action: 'Dismiss', act: () => applyDemo('none') }
+    ? { icon: 'satellite', text: "Few stations are reporting, so the forecast is coarser: treat advice as indicative.", c: 'var(--warning)', action: 'Dismiss', act: () => applyDemo('none') }
     : st.demo === 'offline' ? { icon: 'cloud-off', text: "Can't reach Sora's servers. Retrying every 30 s.", c: 'var(--danger)', action: 'Retry now', act: () => applyDemo('none') }
       : st.savedAt ? { icon: 'cloud-off', text: `You're offline. This is the forecast saved ${savedTime}; trip and day planning need a connection.`, c: 'var(--warning)', action: 'Retry', act: () => applyDemo('loading') }
         : null;

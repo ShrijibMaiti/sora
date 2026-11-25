@@ -2,8 +2,10 @@ import { useState } from 'react';
 import { ME, MODES, recOf, segs } from '../data/sora';
 import { readDays, useSora } from '../state/store';
 import type { Layout } from '../lib/layout';
-import { eventWhen } from '../lib/field';
-import { istDay, istHHMM } from '../lib/time';
+import { eventWhen, sampleField } from '../lib/field';
+import { useRecorder } from '../lib/recorder';
+import { segment, type Piece } from '../lib/track';
+import { istDay, istDayStart, istHHMM } from '../lib/time';
 import { Icon } from './Icon';
 import { placeName } from './panels/TripPanel';
 import { Meter } from './panels/shared';
@@ -17,6 +19,7 @@ const HOUR_MS = 3600e3;
 export function Insights({ L }: { L: Layout }) {
   const { st, set, remind } = useSora();
   const [dismissed, setDismissed] = useState<string[]>([]);
+  const recorder = useRecorder(); // mounted with the app, so recording continues on other tabs
   if (st.tab !== 'ins') return null;
 
   const days = readDays().filter((r) => r.city === st.city).slice(-7);
@@ -132,6 +135,7 @@ export function Insights({ L }: { L: Layout }) {
             )}
           </div>
         )}
+        <Recorded rec={recorder} card={card} />
         <section aria-label="Suggestions" className="stack g12">
           <span className="card-title">Suggestions</span>
           {shown.length === 0 && <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--text-secondary)' }}>Nothing to suggest right now: no option beats your plans with confidence, and no alerts are out.</p>}
@@ -153,6 +157,51 @@ export function Insights({ L }: { L: Layout }) {
         </section>
         <p style={{ margin: '0 0 24px', fontSize: 'var(--fs-micro)', color: 'var(--text-tertiary)' }}>Estimates, not measurements. Lower exposure doesn't mean safe.</p>
       </div>
+    </section>
+  );
+}
+
+const PIECE: Record<Piece['kind'], { icon: string; label: string }> = {
+  stay: { icon: 'map-pin', label: 'Stayed' }, walk: { icon: 'footprints', label: 'Walked' }, vehicle: { icon: 'car', label: 'Rode' },
+};
+
+/* Today's recorded trips and stays, with a rough dose from the PM2.5 field (lib/track.ts); opt-in, on this device only */
+function Recorded({ rec, card }: { rec: ReturnType<typeof useRecorder>; card: React.CSSProperties }) {
+  const { st } = useSora();
+  const F = st.fields.pm25 && st.fields.pm25 !== 'unavailable' ? st.fields.pm25 : null;
+  const today = istDayStart(new Date().toISOString());
+  const pieces = segment(rec.fixes.filter((f) => f.t >= today),
+    (t, lat, lon) => (F ? sampleField(F, (t - Date.parse(F.times[0])) / HOUR_MS, lat, lon).median : 0));
+  const total = pieces.reduce((a, x) => a + x.dose, 0);
+  const span = (x: Piece) => `${istHHMM(new Date(x.start).toISOString())}–${istHHMM(new Date(x.end).toISOString())}`;
+  const mins = (x: Piece) => Math.max(1, Math.round((x.end - x.start) / 60e3));
+  return (
+    <section aria-label="Recorded today" className="card" style={card}>
+      <div className="stack" style={{ gap: 4 }}>
+        <span className="card-title">Recorded today{pieces.length > 0 && F ? `: about ${fmt(total)} µg` : ''}</span>
+        <span style={{ fontSize: 'var(--fs-label)', color: 'var(--text-secondary)' }}>
+          {rec.on ? 'Recording while Sora is open.' : 'Off. Sora can note where you go while it is open, to show what you actually breathed.'}
+        </span>
+      </div>
+      {pieces.length > 0 && (
+        <ul className="stack g12" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+          {pieces.map((x) => (
+            <li key={x.start} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--fs-small)' }}>
+              <Icon name={PIECE[x.kind].icon} size={14} />
+              <span style={{ flex: 1 }}>{PIECE[x.kind].label} {span(x)} · {mins(x)} min{x.kind !== 'stay' ? ` · ${x.km.toFixed(1)} km` : ''}</span>
+              {F && <span className="mono" style={{ fontSize: 'var(--fs-label)' }}>{fmt(x.dose)} µg</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+      {rec.on && pieces.length === 0 && <p style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--text-secondary)' }}>Nothing yet today: stays show after 10 minutes in one place.</p>}
+      {rec.err && <p role="status" style={{ margin: 0, fontSize: 'var(--fs-small)', color: 'var(--warning)' }}>{rec.err}</p>}
+      <button className={rec.on ? 'btn-outline' : 'btn-primary'} style={{ alignSelf: 'flex-start', height: 44, padding: '0 16px', fontSize: 'var(--fs-small)' }}
+        onClick={() => rec.toggle(!rec.on)}>{rec.on ? 'Stop recording' : 'Record my trips'}</button>
+      <p style={{ margin: 0, fontSize: 'var(--fs-micro)', color: 'var(--text-tertiary)' }}>
+        Your location stays on this device and is deleted after 48 hours. Browsers pause location when Sora is in the background, so
+        gaps aren't counted. Car, auto, bus and metro count alike, and every stay as a naturally ventilated building: treat the dose as rough.
+      </p>
     </section>
   );
 }

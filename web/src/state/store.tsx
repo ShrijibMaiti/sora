@@ -28,6 +28,7 @@ export type DayRecord = {
 export type DayStop = {
   name: string; place: string; alt: string; altBld: BuildingKey;
   after: string; before: string; dur: number; bld: BuildingKey; activity: 'rest' | 'light' | 'moderate' | 'high';
+  mode?: ModeKey | ''; // how to travel on to the next stop; '' or absent = the day's mode
 };
 export const NEW_STOP: DayStop = { name: 'New stop', place: '', alt: '', altBld: 'naturally_ventilated', after: '', before: '', dur: 60, bld: 'naturally_ventilated', activity: 'light' };
 
@@ -117,7 +118,7 @@ function initialState(): State {
 type Reminder = { id: string; at: string; title: string; body: string };
 const readList = <T,>(k: string): T[] => { try { return JSON.parse(store.get(k) || '[]') as T[]; } catch { return []; } };
 function readJSON<T>(k: string): Partial<T> { try { return JSON.parse(store.get(k) || '{}') as Partial<T>; } catch { return {}; } }
-const DEVICE_KEYS = ['sora.reminders', 'sora.notify', 'sora.days', 'sora.notif', 'sora.proactive'];
+const DEVICE_KEYS = ['sora.reminders', 'sora.notify', 'sora.days', 'sora.notif', 'sora.proactive', 'sora.track', 'sora.recording'];
 export const readDays = () => readList<DayRecord>('sora.days');
 const KEEP_DAYS = 30;
 
@@ -160,8 +161,15 @@ export function planRequest(st: State, F: Field): PlanRequest | { error: 'missin
   return {
     city: st.city, origin: o, dest: d, mode: t.mode, planned_departure: dep, earliest, latest_departure: new Date(depMs + win).toISOString(),
     latest_arrival: latestArrival, max_extra_min: +t.maxExtra, origin_building: t.ob, dest_building: t.db,
+    pollutant: planPollutant(st),
   };
 }
+
+/** Plan for the pollutant on the map when its forecast is loaded, else PM2.5 (spec §22.5). */
+export const planPollutant = (st: State): PollKey => {
+  const f = st.fields[st.poll];
+  return f && f !== 'unavailable' ? st.poll : 'pm25';
+};
 
 /** Preview-state adjustments (profile menu → Preview states); a no-op in normal use. */
 function applyDemoToPlan(st: State, res: PlanOk): PlanOk {
@@ -201,12 +209,12 @@ function dayRequest(st: State, F: Field): DayRequest {
   };
   const day0 = planDay0(F), at = (t: string) => (t ? new Date(day0 + toMin(t) * 60e3).toISOString() : undefined);
   return {
-    city: st.city, mode: st.prefs.mode, max_extra_min: st.prefs.extra,
+    city: st.city, mode: st.prefs.mode, max_extra_min: st.prefs.extra, pollutant: planPollutant(st),
     stops: st.dayStops.map((s) => ({
       name: s.name.trim() || 'Stop', place: P(s.place),
       alternatives: s.alt ? [{ ...P(s.alt), building: s.altBld }] : undefined,
       arrive_after: at(s.after), leave_before: at(s.before), duration_min: s.dur || undefined,
-      building: s.bld, activity: s.activity,
+      building: s.bld, activity: s.activity, mode: s.mode || undefined,
     })),
   };
 }
@@ -307,7 +315,7 @@ function useSoraStore() {
     try {
       const day = await api.day(dayRequest(s, F));
       set({ day, dayBusy: false, dayDone: true });
-      saveDay(s.city, new Date(planDay0(F) + IST_MS).toISOString().slice(0, 10), day, s.dayStops, s.prefs.mode); // IST date
+      if (planPollutant(s) === 'pm25') saveDay(s.city, new Date(planDay0(F) + IST_MS).toISOString().slice(0, 10), day, s.dayStops, s.prefs.mode); // IST date; history stays PM2.5 so days compare
     }
     catch (e) {
       const saved = isOffline(e) && !!ref.current.savedAt; // offline on a saved forecast: keep the map, explain
@@ -364,8 +372,9 @@ function useSoraStore() {
   const clearHistory = useCallback(() => {
     DEVICE_KEYS.forEach((k) => { try { localStorage.removeItem(k); } catch { /* private mode */ } });
     clearDevice(); // push subscription, reminder texts and the saved trip in the service worker's storage
+    window.dispatchEvent(new Event('sora:cleared')); // stops a recording in progress
     set({ menuOpen: false, notif: { alerts: false, proactive: false, push: false } });
-    notify('History on this device deleted: planned days, reminders, notifications and saved notices.');
+    notify('History on this device deleted: planned days, recorded trips, reminders, notifications and saved notices.');
   }, [set, notify]);
 
   const selectOpt = useCallback((id: RouteId) => {
@@ -429,6 +438,14 @@ function useSoraStore() {
     }, rm ? 1500 : 700);
     return () => { clearInterval(iv); unSaved(); window.removeEventListener('resize', onR); window.removeEventListener('keydown', onK); };
   }, [set, rm, openSearch, notify]);
+
+  /* plans follow the pollutant on the map, once its forecast has loaded */
+  const polled = planPollutant(st);
+  useEffect(() => {
+    if (ref.current.booting) return;
+    runPlan(false);
+    loadDay();
+  }, [polled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* city alerts follow the city on screen (permission is already granted, so no prompt) */
   useEffect(() => {

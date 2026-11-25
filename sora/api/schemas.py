@@ -38,6 +38,7 @@ class PlanRequest(BaseModel):
     max_extra_min: float = Field(ge=0, le=180)
     origin_building: Building
     dest_building: Building
+    pollutant: Pollutant = "pm25"  # what to plan for (spec §22.5)
 
 
 class Place(BaseModel):
@@ -59,6 +60,7 @@ class Stop(BaseModel):
     duration_min: float | None = Field(None, ge=0, le=24 * 60)
     building: Building
     activity: Literal["rest", "light", "moderate", "high"] | None = None
+    mode: Mode | None = None  # how you travel on to the next stop; the day's mode when absent
 
 
 class DayRequest(BaseModel):
@@ -66,6 +68,7 @@ class DayRequest(BaseModel):
     mode: Mode
     max_extra_min: float = Field(ge=0, le=180)
     stops: list[Stop] = Field(max_length=12)
+    pollutant: Pollutant = "pm25"
 
 
 class ShiftDeparture(BaseModel):

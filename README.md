@@ -15,16 +15,17 @@ and day plans that lower your dose, with an honest confidence for each suggestio
 
 | Area | What works |
 |---|---|
-| Forecast | Hourly 0–72 h fields for PM2.5, PM10, NO₂, O₃, SO₂ and CO from the CAMS global forecast (Open-Meteo) on a 12×12 grid, each with a fixed log-normal uncertainty band; rebuilt just after every hour. Labelled degradation **L5 "CAMS only"**: no station correction or street-scale downscaling yet (that is the ML work). Trip and day planning use PM2.5. |
+| Forecast | Hourly 0–72 h fields for PM2.5, PM10, NO₂, O₃, SO₂ and CO from the CAMS global forecast (Open-Meteo) on a 12×12 grid, each with a fixed log-normal uncertainty band; rebuilt just after every hour. Labelled degradation **L3** (spec §39: the fallback forecast): no station correction or street-scale downscaling yet (that is the ML work). Trip and day planning use PM2.5. |
 | Alerts | Stagnant air (low mixing height + calm wind), rain washout, smoke from upwind fires (forecast + FIRMS), and festival smoke from a calendar (Diwali, Bhogi; `events/calendar.py`, extend yearly). |
 | Stations, fires | OpenAQ station status and NASA FIRMS fires on the map when their keys are set. Shown, not assimilated. |
-| Trip planning | Routes on the OSM road network × departure times in your window, dose over a common window (indoors before and after included), 128 shared field samples for every range and "chance it's lower" (spec §23, §24, §31). Options compete on a risk-aware dose (mean + CVaR, §31.2); arrival deadlines must hold on 9 days in 10 given each mode's travel-time spread (§31.3); the full Pareto front, a robustness margin (§31.5–31.6) and a breakdown of where the dose comes from (§22.4) come with every plan. |
+| Trip planning | Routes on the OSM road network × departure times in your window, dose over a common window (indoors before and after included), 128 shared field samples for every range and "chance it's lower" (spec §23, §24, §31). Options compete on a risk-aware dose (mean + CVaR, §31.2); arrival deadlines must hold on 9 days in 10 given each mode's travel-time spread (§31.3); the full Pareto front, a robustness margin (§31.5–31.6) and a breakdown of where the dose comes from (§22.4) come with every plan. Plans follow the pollutant on the map: NO₂, O₃, SO₂, CO and PM10 use their own near-road, indoor and in-vehicle factors (§22.5). |
 | Exposure model | Indoor air follows the dynamic mass-balance model (§21.3): it lags outdoor air by 25–70 min depending on the building, so short peaks are blunted indoors. Breathing rates by activity (§22.2). |
 | Explanations | Template sentences built only from computed numbers (`assistant/explain.py`): why the recommendation wins, which road matters most, how robust the advice is, arrival confidence. |
-| Day planning | Whole-day schedule (07:00–23:00): alternative places and departure shifts within your extra-travel budget, scored on the same risk-aware dose (spec §25). |
+| Metro | Real lines from OpenStreetMap route relations in every city: walk or auto to the station, rides, changes at interchanges, walk or auto at the end (mixed-mode), with a dose for each ride and wait. Typical speeds and waits, not the timetable. |
+| Day planning | Whole-day schedule (07:00–23:00): alternative places and departure shifts within your extra-travel budget, scored on the same risk-aware dose (spec §25). Each leg can use its own mode (car to college, metro home). |
 | What if | Leave later, change mode, change destination / building, stay in during the peak, with the building's lag in the reasoning (spec §26). |
 | Places | Featured places and an example trip and day per city; search over ~2,500 OSM neighbourhoods, stations, destinations and roads, served by Sora's own API. |
-| Web app | Landing page, map app (Live, Trip, Day, What if, Insights), `/styleguide`. Insights shows the days you planned, kept on your device only. WCAG 2.1 AA clean (axe) on every screen, dark and light, desktop and phone. |
+| Web app | Landing page, map app (Live, Trip, Day, What if, Insights), `/styleguide`. Insights shows the days you planned and, if you turn it on, the trips you actually made while Sora was open (stays and rides from GPS, with a rough dose); both stay on your device only. WCAG 2.1 AA clean (axe) on every screen, dark and light, desktop and phone. |
 | Installable + offline | Web app manifest and service worker (`web/public/sw.js`): installable, works offline on the last saved forecast and says so; trip and day planning need a connection. |
 | Notifications | Opt-in, in settings: alerts for the city (smoke, stagnant air, festivals) and suggestions for your saved trip (spec §28.2: ≥15% lower, ≥80% likely, at most one a day), delivered by Web Push even when Sora is closed. Reminder texts and your trip stay on the device; the server keeps only where to push and when (`sora/push.py`). |
 | Ops | One process serves API + app, gzip, security headers (CSP with hashed inline script, no framing), per-IP rate limits, `/api/health`, `/api/metrics` (Prometheus), Docker image. CI runs backend tests, the web build, the Docker build, and the browser smoke and accessibility tests on synthetic data (`SORA_FAKE_DATA=1`). |
@@ -33,7 +34,7 @@ Placeholders (empty files in the tree below): the T0 field model (station ML + L
 generative uncertainty, simulators, mobility inference, personal twin, baselines and evaluation.
 
 Shortcuts the answers state in their caveats: fixed microenvironment, near-road, indoor and speed priors instead of
-fitted values and live traffic; one travel-time spread per mode; metro approximated along roads; field uncertainty
+fitted values and live traffic; one travel-time spread per mode; metro at typical speeds and waits, not the timetable; field uncertainty
 from a fixed prior, not an ensemble; robustness as one uniform perturbation, not per-region sensitivities.
 
 ## Run
@@ -47,6 +48,7 @@ uvicorn sora.api.main:app --reload            # API on :8000. First start fetche
 cd web; npm install
 $env:VITE_USE_MOCK='false'; npm run dev       # app on :5173 against the API (omit the variable for the in-browser mock)
 pytest                                        # backend tests on synthetic data, no network
+cd web; npm test; cd ..                       # on-device logic (trip recording), Node 22.18+
 ```
 
 Production, one process serving the API and the built app (`/`, `/app`, `/styleguide`, `/api/*`):
@@ -83,8 +85,8 @@ built app on synthetic data and runs `scripts/smoke.py` (every screen + offline)
 
 Any container host works: run the image with a persistent volume on `/data` (road graphs, place index, push store,
 VAPID key) and HTTPS in front (service workers and push need it). Set `SORA_VAPID_SUBJECT`, `SORA_TRUST_PROXY=1`
-behind a proxy, optionally `OPENAQ_API_KEY`, `FIRMS_MAP_KEY` and `SORA_METRICS_TOKEN`. One instance: the push store and
-caches are local files, so scaling out needs a shared store first. Before a public launch, move map tiles from
+behind a proxy, optionally `OPENAQ_API_KEY`, `FIRMS_MAP_KEY` and `SORA_METRICS_TOKEN`. Several workers on one host are fine (the
+push store is SQLite, `push.db`, and claims each wake-up once); scaling across hosts needs a shared database first. Before a public launch, move map tiles from
 tile.openstreetmap.org (light use only) to a keyed tile provider and add it to the CSP in `sora/api/middleware.py`.
 
 ## API
@@ -118,8 +120,7 @@ sora/
 ├── .github/workflows/ci.yml          ● tests, web build, Docker build
 ├── docs/                             spec, API contract, original plan, session history
 │
-├── configs/                          placeholders (city / sim / experiment YAML)
-│   ├── cities/{delhi,kolkata,mumbai,chennai}.yaml                                              §3.3
+├── configs/                          placeholders for the ML work (cities live in sora/config.py)
 │   ├── sim/wrfchem_namelist.template · ensemble.yaml                                           §17.4, §34.2  T1
 │   └── experiments/{baselines,operator,ablations}.yaml                                         §35–36
 │
@@ -127,14 +128,14 @@ sora/
 │   ├── config.py                     ● cities, featured places, example trip/day, constants   §3.3
 │   ├── geo.py                        ● distances, projections
 │   ├── pipeline.py                   ● hourly refresh of field, road graph, place index       §18.2
-│   ├── push.py                       ● Web Push store and sender (wake-ups, city alerts)      §28
+│   ├── push.py                       ● Web Push store (SQLite) and sender (wake-ups, alerts)  §28
 │   ├── fake.py                       ● synthetic data for tests and SORA_FAKE_DATA=1
 │   │
 │   ├── data/                         L1 ingestion                                              §11
 │   │   ├── openmeteo.py              ● CAMS PM2.5 + ERA5/IFS met (point API)                    T0
 │   │   ├── openaq.py                 ● station status + hourly PM2.5 (OpenAQ v3)                T0
 │   │   ├── qc.py                     ● range / stuck / spike checks                             §12.4  T0
-│   │   ├── osm.py                    ● road network + place names (Overpass)                    T0
+│   │   ├── osm.py                    ● road network, place names, metro lines (Overpass)        T0
 │   │   ├── fires.py                  ● FIRMS active fires                                       §11.3
 │   │   ├── cpcb.py · era5.py · cams.py · satellite.py · buildings.py · traffic.py              T1
 │   │   └── inventories.py · campaign.py                                                        T1
@@ -143,10 +144,11 @@ sora/
 │   ├── representation/               L3                                                        §13
 │   │   ├── road_graph.py             ● OSM graph as arrays, snapping, scipy shortest paths
 │   │   ├── places.py                 ● place search index (featured + OSM names + roads)
+│   │   ├── transit.py                ● metro network: stations, lines, rides, interchanges     §23.6
 │   │   └── grid.py · mapping.py · static_features.py · wind_edges.py
 │   │
 │   ├── field/                        T0 field model                                            §43
-│   │   ├── forecast.py               ● 0–72 h fields, six pollutants (CAMS, L5), cache, backoff  §18
+│   │   ├── forecast.py               ● 0–72 h fields, six pollutants (CAMS, L3), cache, backoff  §18
 │   │   └── correction.py · downscale_lur.py · aqi.py        station ML, LUR, NAQI             T0
 │   │
 │   ├── physics/ · operator/ · gnn/   L4 physics layer, neural operator, street GNN             §14–17  T1/T2
@@ -191,7 +193,7 @@ sora/
 │       ├── main.py                   ● app, errors, /health, /metrics, serves web/dist, pipeline + push loops
 │       ├── middleware.py             ● security headers (CSP), rate limits, metrics
 │       ├── schemas.py                ● request models, contract errors
-│       └── routes/field.py · events.py · plan.py · places.py · push.py   ● (counterfactual.py: placeholder)
+│       └── routes/field.py · events.py · plan.py (plan, day, what-if) · places.py · push.py   ●
 │
 ├── scripts/
 │   ├── smoke.py                      ● end-to-end browser check: every screen, offline mode
@@ -217,9 +219,10 @@ sora/
         │                                              behind the mock and the fail-safes
         ├── lib/field.ts · time.ts · layout.ts         field sampling, IST times, layout geometry
         ├── lib/device.ts                              service worker, on-device storage, Web Push
+        ├── lib/track.ts · recorder.ts                 on-device trip recording: stays, rides, dose (npm test)
         ├── styleguide/Styleguide.tsx                  design system page
         └── components/
             ├── Chrome.tsx · MapView.tsx · MapChrome.tsx · SidePanel.tsx · Overlays.tsx · Icon.tsx
-            ├── Insights.tsx                           planned-day history + suggestions (on device)
+            ├── Insights.tsx                           planned-day history, recorded trips, suggestions (on device)
             └── panels/LivePanel.tsx · TripPanel.tsx · DayPanel.tsx · WhatIfPanel.tsx · shared.tsx
 ```

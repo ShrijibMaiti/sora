@@ -39,7 +39,7 @@ def test_field_matches_contract():
     assert len(f["times"]) == T and f["times"][0] == f["meta"]["analysis_time"]
     assert f["lats"] == sorted(f["lats"]) and f["lons"] == sorted(f["lons"])
     assert not np.isnan(med).any() and (p05 <= med).all() and (med <= p95).all()
-    assert len(f["wind"]["dir_deg"]) == T and f["meta"]["degradation"] == "L5"
+    assert len(f["wind"]["dir_deg"]) == T and f["meta"]["degradation"] == "L3"
     # spread widens with lead time
     assert (p95[-1] / med[-1]).mean() > (p95[0] / med[0]).mean()
 

@@ -84,6 +84,35 @@ def write_places(bbox, path: Path):
     path.write_text(json.dumps(osm_places(bbox)), encoding="utf-8")
 
 
+def osm_transit(bbox) -> dict:
+    """Two metro lines crossing at "Central" on the city's street grid, mapped like OSM: one relation per direction,
+    ordered stop nodes, the interchange named per line ("Central (Red Line)") as OSM often does."""
+    key = next(k for k, c in config.CITIES.items() if tuple(c.bbox) == tuple(bbox))
+    s, w, n, e = config.CITIES[key].route_bbox
+    row, col = s, w + 0.06  # south edge and near the east side: both grid corners are a walk from a station
+    red = [(row, w + 0.01 * i) for i in range(0, int(round((e - w) / 0.01)) + 1, 2)]
+    blue = [(s + 0.01 * i, col) for i in range(0, int(round((n - s) / 0.01)) + 1, 2)]
+    nodes, rels, nid = [], [], 1000
+
+    def stop(lat, lon, name):
+        nonlocal nid
+        nid += 1
+        nodes.append({"type": "node", "id": nid, "lat": lat, "lon": lon, "tags": {"name": name, "railway": "stop"}})
+        return nid
+
+    for line, colour, pts in (("Red Line", "#FF4040", red), ("Blue Line", "#4169E1", blue)):
+        ids = [stop(la, lo, f"Central ({line})" if abs(la - row) < 1e-9 and abs(lo - col) < 1e-9 else f"{line[:-5]} {i}")
+               for i, (la, lo) in enumerate(pts)]
+        for direction, seq in (("→", ids), ("←", ids[::-1])):
+            rels.append({"type": "relation", "id": len(rels) + 1, "tags": {"route": "subway", "name": f"{line} ({direction})", "colour": colour},
+                         "members": [{"type": "node", "ref": r, "role": "stop"} for r in seq]})
+    return {"elements": rels + nodes}
+
+
+def write_transit(bbox, path: Path):
+    path.write_text(json.dumps(osm_transit(bbox)), encoding="utf-8")
+
+
 def install():
     """Swap every network source for synthetic data, with a scratch cache folder (never the real data_cache)."""
     grids: dict[str, road_graph.RoadGraph] = {}
@@ -91,5 +120,6 @@ def install():
     openmeteo.fetch_points = fake_points()
     road_graph.get = lambda key: grids.setdefault(key, street_grid(key))
     osm.fetch_places = write_places
+    osm.fetch_transit = write_transit
     for k in ("OPENAQ_API_KEY", "FIRMS_MAP_KEY"):
         os.environ.pop(k, None)

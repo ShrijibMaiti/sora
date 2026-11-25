@@ -57,7 +57,7 @@ def test_field_carries_stations_and_fires_but_stays_cams_only(monkeypatch):
     monkeypatch.setattr(fires, "fetch", lambda bbox: [[30.1, 75.5]])
     f = client.get("/api/field?city=delhi").json()
     assert f["meta"]["n_stations"] == 2 and f["meta"]["n_reporting"] == 1 and f["fires"] == [[30.1, 75.5]]
-    assert f["meta"]["degradation"] == "L5" and not np.any(f["coverage"])  # shown, not assimilated
+    assert f["meta"]["degradation"] == "L3" and not np.any(f["coverage"])  # shown, not assimilated
 
 
 def test_station_or_fire_outage_never_blocks_the_field(monkeypatch):

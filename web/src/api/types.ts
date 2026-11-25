@@ -22,6 +22,7 @@ export type PlanRequest = {
   city: string; origin: LatLng; dest: LatLng; mode: ModeKey;
   planned_departure: ISO; earliest: ISO; latest_departure: ISO; latest_arrival: ISO | null;
   max_extra_min: number; origin_building: BuildingKey; dest_building: BuildingKey;
+  pollutant?: PollKey; // what to plan for; PM2.5 when absent
 };
 export type WireOption = {
   id: RouteId; label: string; departure: ISO; travel_min: number; distance_km: number;
@@ -36,11 +37,12 @@ export type PlanResponse = {
 
 export type Place = { label: string; lat: number; lon: number };
 export type DayRequest = {
-  city: string; mode: ModeKey; max_extra_min: number;
+  city: string; mode: ModeKey; max_extra_min: number; pollutant?: PollKey;
   stops: {
     name: string; place: Place; alternatives?: (Place & { building?: BuildingKey })[];
     arrive_after?: ISO; leave_before?: ISO; duration_min?: number;
     building: BuildingKey; activity?: 'rest' | 'light' | 'moderate' | 'high';
+    mode?: ModeKey; // to the next stop; the day's mode when absent
   }[];
 };
 export type Segment = { me: MeKey; start: ISO; end: ISO; dose: number; label?: string };

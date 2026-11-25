@@ -1,5 +1,4 @@
 """Station quality control (spec §12.4). Missing values are left missing, never imputed."""
-import pandas as pd
 
 
 def _stuck(s):

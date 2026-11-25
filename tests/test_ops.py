@@ -85,11 +85,9 @@ def test_push_key_and_subscription_flow():
 def test_push_due_wakes_and_alerts():
     sid = push.upsert(SUB, "delhi", alerts=True)
     now = datetime(2027, 1, 10, 4, 0, tzinfo=timezone.utc)  # 09:30 IST
-    with push._lock:
-        subs = push._load()
-        subs[sid]["wakes"] = [{"id": "r1", "at": (now - timedelta(minutes=1)).isoformat()},
-                              {"id": "later", "at": (now + timedelta(hours=2)).isoformat()}]
-        push._save(subs)
+    with push._tx() as db:  # add_wake only takes times from now on; these are relative to a fixed `now`
+        db.executemany("INSERT INTO wakes VALUES (?, ?, ?)", [(sid, "r1", push._ts(now - timedelta(minutes=1))),
+                                                             (sid, "later", push._ts(now + timedelta(hours=2)))])
     event = {"kind": "inversion", "title": "Stagnant air", "body": "Calm night.", "start": "2027-01-10T12:00:00Z",
              "severity": "warning"}
     first = push.due(now, lambda city: [event])
@@ -110,4 +108,18 @@ def test_push_send_forgets_unsubscribed_browsers(monkeypatch):
     monkeypatch.setattr(push, "webpush", fake_webpush)
     assert push.send(sid, {"type": "wake", "id": "x"}) is False
     assert sent and sent[0]["vapid_claims"]["sub"].startswith(("mailto:", "https:"))
-    assert sid not in push._load()
+    assert push.subscription(sid) is None
+
+
+def test_push_wakes_are_claimed_once_across_workers():
+    """Several server processes share push.db: a due wake must go out exactly once."""
+    from concurrent.futures import ThreadPoolExecutor
+    now = datetime.now(timezone.utc)
+    sids = [push.upsert({**SUB, "endpoint": f"{SUB['endpoint']}{i}"}, None, alerts=False) for i in range(5)]
+    for sid in sids:
+        for k in range(10):
+            assert push.add_wake(sid, f"w{k}", now)
+    with ThreadPoolExecutor(8) as ex:
+        got = [x for r in ex.map(lambda _: push.due(now + timedelta(seconds=1), lambda c: []), range(8)) for x in r]
+    assert len(got) == 50 and len({(sid, p["id"]) for sid, p in got}) == 50
+    assert push.remove(sids[0]) and not push.remove(sids[0])

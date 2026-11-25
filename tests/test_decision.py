@@ -48,7 +48,7 @@ def test_plan_matches_contract():
     for o in p["options"]:
         assert 0 <= o["p_better"] <= 1
     assert p["window"]["start"] == body["earliest"] and p["window"]["end"] > body["latest_departure"]
-    assert p["explanation"] and any("stations" in c for c in p["caveats"]) and p["degradation"] == "L5"
+    assert p["explanation"] and any("stations" in c for c in p["caveats"]) and p["degradation"] == "L3"
     # A is the lowest dose and C the quickest among the options
     a, _, c = p["options"]
     assert a["dose"]["median"] <= min(o["dose"]["median"] for o in [base, *p["options"]])
@@ -96,6 +96,39 @@ def test_arrival_deadline_is_a_chance_constraint():
     assert tight.status_code == 400 and tight.json()["detail"]["code"] == "no_feasible"  # ~50% late: refused
     roomy = client.post("/api/plan", json=body | {"latest_arrival": iso(dep + timedelta(minutes=round(typical * 1.6)))})
     assert roomy.status_code == 200
+
+
+def test_metro_on_real_lines():
+    from sora import config, fake
+    from sora.representation.transit import Transit
+    net = Transit(fake.osm_transit(config.CITIES["delhi"].bbox))
+    assert net.names.count("Central") == 1 and len(net.lines) == 2  # "Central (Red Line)" + "(Blue Line)": one interchange
+    r = client.post("/api/plan", json=plan_body(mode="metro"))
+    assert r.status_code == 200, r.text
+    b = next(o for o in r.json()["options"] if o["id"] == "B")
+    first = r.json()["explanation"][0]
+    assert first.startswith("By metro:") and "Red Line to Central" in first and "Blue Line" in first, first
+    kinds = {s["kind"] for s in b["segments"]}
+    assert {"transit", "indoor"} <= kinds
+    assert any(s["label"].startswith("changing at Central") for s in b["segments"])
+    far = client.post("/api/plan", json=plan_body(mode="metro", origin=[28.60, 77.185], dest=[28.60, 77.20]))
+    assert far.status_code == 400 and far.json()["detail"]["code"] == "no_route"  # no station within 2.5 km
+
+
+def test_planning_other_pollutants(monkeypatch):
+    from sora.exposure.microenv import road_inc
+    monkeypatch.setattr(openmeteo, "fetch_points", fake_points(gases={"nitrogen_dioxide": 60.0, "carbon_monoxide": 1000.0}))
+    pm = client.post("/api/plan", json=plan_body()).json()
+    no2 = client.post("/api/plan", json=plan_body(pollutant="no2")).json()
+    co = client.post("/api/plan", json=plan_body(pollutant="co")).json()
+    assert pm["pollutant"] == "pm25" and no2["pollutant"] == "no2" and co["pollutant"] == "co"
+    assert no2["baseline"]["dose"]["median"] != pm["baseline"]["dose"]["median"]
+    assert co["baseline"]["dose"]["median"] > 5 * pm["baseline"]["dose"]["median"]  # 1 mg/m³ = 1000 µg/m³: dose in µg
+    gone = client.post("/api/plan", json=plan_body(pollutant="so2"))
+    assert gone.status_code == 404 and gone.json()["detail"]["code"] == "unavailable"
+    assert client.post("/api/day", json=day_body()[0] | {"pollutant": "no2"}).status_code == 200
+    # NO₂ rises much more beside main roads than PM2.5; ozone drops (traffic NO consumes it)
+    assert road_inc(1.25, "no2") > road_inc(1.25, "pm25") > 1 > road_inc(1.25, "o3")
 
 
 def test_flat_field_is_not_reliably_different(monkeypatch):
@@ -202,6 +235,17 @@ def test_day_matches_contract_and_picks_filtered_gym():
     assert all(c["delta_ug"] < 0 for c in d["changes"])
     assert all(-c["delta_ug"] >= 0.005 * d["original"]["total"]["median"] for c in d["changes"]), "no trivial changes"
     assert d["p_better"] >= 0.9 and d["reduction_pct"]["p05"] > 0 and 0 <= d["extra_min"] <= 15
+
+
+def test_day_per_leg_mode():
+    body, _ = day_body()
+    body["stops"][3]["mode"] = "metro"  # car all day, metro home from dinner (Blue Line on the synthetic map)
+    r = client.post("/api/day", json=body)
+    assert r.status_code == 200, r.text
+    legs = [s for s in r.json()["original"]["segments"] if s["me"] in ("vehicle", "metro")]
+    assert [s.get("label") for s in legs] == ["Car", "Car", "Car", "Metro"]
+    body["stops"][0]["mode"] = "metro"  # no station near IIT Delhi on the synthetic map
+    assert client.post("/api/day", json=body).json()["detail"]["code"] == "no_route"
 
 
 def test_day_errors():

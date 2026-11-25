@@ -104,18 +104,34 @@ export async function plan(q: PlanRequest): Promise<PlanResponse> {
   };
   const offs: Record<RouteId, [number, number]> = { plan: [0, 1], A: [-0.14, 1.5], B: [0.06, 1], C: [0.18, 0.6] };
   const fixedWindow = Date.parse(q.earliest) === depMs && Date.parse(q.latest_departure) === depMs;
-  const wire = (x: TripOption): WireOption => ({
-    id: x.id, label: x.label,
-    departure: iso(fixedWindow ? depMs : depMs + (x.departure_min - depMin) * 60e3),
-    travel_min: Math.max(4, Math.round(x.travel_min * k)), distance_km: +(x.distance_km * k).toFixed(1),
-    dose: { median: Math.max(2, Math.round(x.dose.median * k)), p05: Math.max(2, Math.round(x.dose.p05 * k)), p95: Math.max(2, Math.round(x.dose.p95 * k)) },
-    reduction_pct: x.reduction_pct, p_better: x.p_better, extra_min: Math.round(x.extra_min * Math.min(1, k + 0.2)),
-    path: isDefault ? x.path : mkPath(offs[x.id][0], offs[x.id][1]),
-  });
+  const winStart = depMs - 90 * 60e3, winEnd = depMs + 60 * 60e3;
+  const wire = (x: TripOption): WireOption => {
+    const dep = fixedWindow ? depMs : depMs + (x.departure_min - depMin) * 60e3, travel = Math.max(4, Math.round(x.travel_min * k));
+    const dose = Math.max(2, Math.round(x.dose.median * k));
+    /* demo breakdown (spec §22.4): road time weighs ~2.5× indoor time per minute; shapes match the real API */
+    const before = Math.max(0, (dep - winStart) / 60e3), after = Math.max(0, (winEnd - dep) / 60e3 - travel);
+    const wsum = before * 0.4 + travel + after * 0.4 || 1, part = (w: number) => +((dose * w) / wsum).toFixed(1);
+    return {
+      id: x.id, label: x.label, departure: iso(dep), travel_min: travel, distance_km: +(x.distance_km * k).toFixed(1),
+      dose: { median: dose, p05: Math.max(2, Math.round(x.dose.p05 * k)), p95: Math.max(2, Math.round(x.dose.p95 * k)) },
+      reduction_pct: x.reduction_pct, p_better: x.p_better, extra_min: Math.round(x.extra_min * Math.min(1, k + 0.2)),
+      path: isDefault ? x.path : mkPath(offs[x.id][0], offs[x.id][1]),
+      segments: [
+        { label: 'main roads', kind: 'road' as const, minutes: Math.round(travel * 0.6), dose: part(travel * 0.6) },
+        { label: 'local streets', kind: 'road' as const, minutes: Math.round(travel * 0.4), dose: part(travel * 0.4) },
+        { label: 'indoors before you leave', kind: 'indoor' as const, minutes: Math.round(before), dose: part(before * 0.4) },
+        { label: 'indoors after you arrive', kind: 'indoor' as const, minutes: Math.round(after), dose: part(after * 0.4) },
+      ].filter((s) => s.minutes > 0).sort((a, b) => b.dose - a.dose),
+    };
+  };
+  const options = res.options.map(wire);
   return {
-    baseline: wire(res.baseline), options: res.options.map(wire), recommended: res.recommended as Exclude<RouteId, 'plan'>,
+    baseline: wire(res.baseline), options, recommended: res.recommended as Exclude<RouteId, 'plan'>,
     reliable: res.reliable, explanation: res.explanation, caveats: res.caveats, degradation: res.degradation,
-    window: { start: iso(depMs - 90 * 60e3), end: iso(depMs + 60 * 60e3) },
+    window: { start: iso(winStart), end: iso(winEnd) },
+    front: options.slice().sort((a, b) => a.travel_min - b.travel_min)
+      .filter((o, i, all) => all.slice(0, i).every((f) => f.dose.median > o.dose.median))
+      .map((o) => ({ departure: o.departure, travel_min: o.travel_min, extra_min: o.extra_min, dose: o.dose, risk: o.dose.median })),
   };
 }
 

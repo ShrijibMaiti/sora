@@ -54,8 +54,9 @@ def dose(ens, lats, lons, p: Pieces):
     return (conc(ens["C"], lats, lons, h, lat, lon) * mult * w).sum(1)
 
 
-def dwell(h_a, h_b, lat, lon, building, vent_lpm):
+def dwell(h_a, h_b, lat, lon, building, vent_lpm, indoor_mult=1.0):
     """Indoor time at a place from hour h_a to h_b, through the dynamic indoor model (spec §21.3): the pieces are
-    outdoor concentrations at and before the stay, weighted by how much of each reaches the person inside."""
+    outdoor concentrations at and before the stay, weighted by how much of each reaches the person inside.
+    `indoor_mult` adjusts F_inf for pollutants other than PM2.5 (microenv.POLLUTANT)."""
     t, w = indoor.dose_weights(h_a, h_b, building, vent_lpm)
-    return Pieces().add(t, lat, lon, w, building) if len(t) else Pieces()
+    return Pieces().add(t, lat, lon, w * indoor_mult, building) if len(t) else Pieces()

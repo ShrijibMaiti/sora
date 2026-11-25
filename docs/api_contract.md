@@ -56,7 +56,7 @@ City[] = {
 Hourly forecast field for one pollutant, 0–72 h (spec §18). Errors: `not_built`, `unavailable`, `unknown_city`, `upstream`.
 
 Backend status: all six pollutants from the CAMS global forecast on a 12×12 grid, each with a fixed log-normal error
-band (wider for NO₂ and SO₂, which CAMS resolves poorly at city scale; `degradation: "L5"`). A pollutant with no CAMS
+band (wider for NO₂ and SO₂, which CAMS resolves poorly at city scale; `degradation: "L3"`, spec §39: the fallback forecast). A pollutant with no CAMS
 data answers `unavailable`. The planner (`/plan`, `/day`, `/counterfactual`) uses PM2.5 only. No stations are
 assimilated yet (`coverage` all 0: the UI then treats every cell as having data); `stations` lists OpenAQ monitors for
 display when a key is set.
@@ -102,6 +102,7 @@ Request:
   max_extra_min: number;
   origin_building: "naturally_ventilated" | "ac_sealed" | "ac_filtered";
   dest_building:   "naturally_ventilated" | "ac_sealed" | "ac_filtered";
+  pollutant?: Pollutant;         // what to plan for, default "pm25" (spec §22.5); 404 unavailable if not forecast
 }
 ```
 
@@ -109,6 +110,7 @@ Response:
 
 ```ts
 {
+  pollutant: Pollutant;          // echoes the request
   baseline: Option;              // id "plan": the user's own plan
   options: Option[];             // ids "A" lowest exposure, "B" balanced, "C" fastest
   recommended: "A" | "B" | "C";
@@ -131,8 +133,9 @@ Option = {
   p_better: number | null;       // paired P(dose < baseline), null for baseline (spec §31.5)
   extra_min: number;
   path: LatLng[];
-  segments?: { label: string; kind: "indoor" | "access" | "road"; minutes: number; dose: number }[];
-                                 // where the dose comes from (spec §22.4), on the median field, largest first
+  segments?: { label: string; kind: "indoor" | "access" | "road" | "transit"; minutes: number; dose: number }[];
+                                 // where the dose comes from (spec §22.4), on the median field, largest first;
+                                 // metro: "transit" rows for each ride, wait and change
 }
 ```
 
@@ -142,7 +145,14 @@ B is the knee with small penalties for extra travel and moving the departure, C 
 by mode (spec §31.3). Indoor time uses the dynamic mass-balance model (spec §21.3). `front`, `robustness` and
 `segments` are absent from the in-browser mock.
 
-Errors: `invalid`, `outside`, `no_route`, `no_feasible`, `beyond_horizon`, `not_built`.
+Other pollutants use pollutant-specific near-road increments, indoor ratios and cabin filtering
+(`sora/exposure/microenv.py` `POLLUTANT`; CO doses are in µg like the rest). Metro trips run on the real lines from
+OpenStreetMap route relations: walk (≤ 1.2 km) or auto to one of the 3 stations nearest each end, rides at typical
+speed, a 4-min wait per boarding and 5 min per change; the first explanation line describes the journey
+(`By metro: walk 9 min to Malviya Nagar; Yellow Line to Rajiv Chowk (10 stops); …`). `no_route` when no station is
+within 2.5 km of either end.
+
+Errors: `invalid`, `outside`, `no_route`, `no_feasible`, `beyond_horizon`, `not_built`, `unavailable`.
 
 ## POST /api/day
 
@@ -152,7 +162,7 @@ Request:
 
 ```ts
 {
-  city: string; mode: Mode; max_extra_min: number;
+  city: string; mode: Mode; max_extra_min: number; pollutant?: Pollutant;  // default "pm25"
   stops: {
     name: string;                // "Home", "College", "Gym"…
     place: { label: string; lat: number; lon: number };
@@ -160,11 +170,13 @@ Request:
     arrive_after?: ISO; leave_before?: ISO; duration_min?: number;
     building: Building;
     activity?: "rest" | "light" | "moderate" | "high";
+    mode?: Mode;                 // how to travel on to the next stop (mixed-mode days); the day's mode when absent
   }[];
 }
 ```
 
-Errors: `invalid` (fewer than two stops), `no_feasible` (stops don't fit their windows), `not_built`.
+Errors: `invalid` (fewer than two stops), `no_feasible` (stops don't fit their windows), `no_route` (e.g. no metro
+station near a stop), `not_built`, `unavailable`.
 
 Response:
 

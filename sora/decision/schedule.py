@@ -13,7 +13,7 @@ import numpy as np
 from ..exposure import dose as dosing
 from ..exposure.microenv import BUILDING_LABEL, MODES, VENT
 from . import confidence, risk
-from .routing import Ctx, PlanError, endpoints, free_minutes, iso, leg
+from .routing import Ctx, PlanError, endpoints, free_minutes, iso, journeys, leg
 
 DAY_START, DAY_END = 7 * 60, 23 * 60  # minutes after IST midnight
 IST_S = 5.5 * 3600
@@ -62,8 +62,7 @@ class Sim:
 
 class Day:
     def __init__(self, req):
-        self.req, self.ctx = req, Ctx(req.city)
-        self.mode = MODES[req.mode]
+        self.req, self.ctx = req, Ctx(req.city, req.pollutant)
         self.day0 = day_start_ts(req, self.ctx)
         self.ctx.check_horizon(self.ts(DAY_START), self.ts(DAY_END))
         for s in req.stops:
@@ -82,20 +81,28 @@ class Day:
         alt = s.alternatives[0] if choice[i] and s.alternatives else None
         return (alt or s.place), (alt.building if alt and alt.building else s.building)
 
-    def path(self, a, b):
-        key = (a.lat, a.lon, b.lat, b.lon)
+    def mode_of(self, i):
+        """How you travel from stop i to the next: the stop's own choice, else the day's mode."""
+        return self.req.stops[i].mode or self.req.mode
+
+    def path(self, a, b, mode):
+        key = (a.lat, a.lon, b.lat, b.lon, mode)
         if key not in self._paths:
-            o, d, _ = endpoints(self.ctx, self.req.mode, (a.lat, a.lon), (b.lat, b.lon))
-            p = self.ctx.g.route(o, d, free_minutes(self.ctx, self.req.mode), self.mode.motor)
-            if p is None:
-                raise PlanError(400, "no_route", f"No {self.mode.label.lower()} route from {a.label} to {b.label}.")
-            self._paths[key] = p
+            if mode == "metro":
+                self._paths[key] = journeys(self.ctx, (a.lat, a.lon), (b.lat, b.lon), k=1)[0]
+            else:
+                m = MODES[mode]
+                o, d, _ = endpoints(self.ctx, mode, (a.lat, a.lon), (b.lat, b.lon))
+                p = self.ctx.g.route(o, d, free_minutes(self.ctx, mode), m.motor)
+                if p is None:
+                    raise PlanError(400, "no_route", f"No {m.label.lower()} route from {a.label} to {b.label}.")
+                self._paths[key] = p
         return self._paths[key]
 
     def dwell(self, i, choice, a, b):
         p, bld = self.place(i, choice)
         vent = VENT[self.req.stops[i].activity or "light"]
-        pieces = dosing.dwell(self.ctx.h(self.ts(a)), self.ctx.h(self.ts(b)), p.lat, p.lon, bld, vent)
+        pieces = dosing.dwell(self.ctx.h(self.ts(a)), self.ctx.h(self.ts(b)), p.lat, p.lon, bld, vent, self.ctx.indoor)
         return dosing.dose(self.ctx.ens, self.ctx.lats, self.ctx.lons, pieces)
 
     def simulate(self, choice, shift) -> Sim:
@@ -111,16 +118,18 @@ class Day:
                 break
             here, _ = self.place(i, choice)
             there, _ = self.place(i + 1, choice)
-            lg = leg(self.ctx, self.req.mode, self.path(here, there), self.ts(end), (here.lat, here.lon), (there.lat, there.lon))
+            mode = self.mode_of(i)
+            pth = self.path(here, there, mode)
+            lg = leg(self.ctx, mode, pth, self.ts(end), (here.lat, here.lon), (there.lat, there.lon))
             after = self.at(stops[i + 1].arrive_after)
             if after is not None and end + lg.minutes < after:  # wait here rather than arrive early
                 end = after - lg.minutes
-                lg = leg(self.ctx, self.req.mode, lg.edges, self.ts(end), (here.lat, here.lon), (there.lat, there.lon))
+                lg = leg(self.ctx, mode, pth, self.ts(end), (here.lat, here.lon), (there.lat, there.lon))
             if (before is not None and end > before and i > 0) or (end - start < 15 and i > 0):
                 r.ok = False
             label = self.place(i, choice)[0].label if choice[i] else None
             r.segs.append((me_of(s.name), start, end, self.dwell(i, choice, start, end), label))
-            r.segs.append((self.mode.me, end, end + lg.minutes, dosing.dose(self.ctx.ens, self.ctx.lats, self.ctx.lons, lg.pieces), self.mode.label))
+            r.segs.append((MODES[mode].me, end, end + lg.minutes, dosing.dose(self.ctx.ens, self.ctx.lats, self.ctx.lons, lg.pieces), MODES[mode].label))
             r.travel += lg.minutes
             r.ends.append(end)
             t = end + lg.minutes

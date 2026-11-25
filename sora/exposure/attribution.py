@@ -17,18 +17,21 @@ def _median_ens(ctx):
 
 
 def segments(ctx, t, start: float, end: float, o_ll, d_ll, ob: str, db: str, vent_lpm: float) -> list[dict]:
-    """[{label, kind: indoor|access|road, minutes, dose}] for one plan over [start, end], largest dose first."""
+    """[{label, kind: indoor|access|road|transit, minutes, dose}] for one plan over [start, end], largest dose first."""
     ens = _median_ens(ctx)
     total = lambda p: float(dosing.dose(ens, ctx.lats, ctx.lons, p)[0])
     rows = [
         {"label": "indoors before you leave", "kind": "indoor", "minutes": (t.dep - start) / 60,
-         "dose": total(dosing.dwell(ctx.h(start), ctx.h(t.dep), o_ll[0], o_ll[1], ob, vent_lpm))},
+         "dose": total(dosing.dwell(ctx.h(start), ctx.h(t.dep), o_ll[0], o_ll[1], ob, vent_lpm, ctx.indoor))},
         {"label": "indoors after you arrive", "kind": "indoor", "minutes": (end - t.arr) / 60,
-         "dose": total(dosing.dwell(ctx.h(t.arr), ctx.h(end), d_ll[0], d_ll[1], db, vent_lpm))},
+         "dose": total(dosing.dwell(ctx.h(t.arr), ctx.h(end), d_ll[0], d_ll[1], db, vent_lpm, ctx.indoor))},
     ]
     if t.access_w:
         rows.append({"label": "walking and waiting outdoors", "kind": "access", "minutes": t.access_min,
                      "dose": float(ctx.air(t.dep + t.access_min * 30, o_ll[0], o_ll[1]) * t.access_w)})
+    for p in t.parts:  # metro: waits, rides, changes, auto hailing
+        rows.append({"label": p["label"], "kind": p["kind"], "minutes": p["minutes"],
+                     "dose": float((ctx.air(p["ts"], p["lat"], p["lon"]) * p["w"]).sum())})
     g = ctx.g
     per_edge = ctx.air(t.edge_mid, g.mid_lat[t.edges], g.mid_lon[t.edges]) * t.edge_w
     roads: dict[str, list[float]] = {}

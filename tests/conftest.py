@@ -7,9 +7,9 @@ import pytest
 
 from sora import config
 from sora.data import openmeteo, osm
-from sora.fake import OSM_PLACES, fake_points, street_grid  # noqa: F401  (fake_points is imported by the tests)
+from sora.fake import OSM_PLACES, fake_points, street_grid, write_transit  # noqa: F401  (fake_points is imported by the tests)
 from sora.field import forecast
-from sora.representation import places, road_graph
+from sora.representation import places, road_graph, transit
 from sora.uncertainty import ensemble
 
 GRID = street_grid("delhi")
@@ -28,6 +28,8 @@ def fresh(monkeypatch, tmp_path):
     forecast._failed.clear()
     ensemble._cache.clear()
     places._index.clear()
+    transit._nets.clear()
+    monkeypatch.setattr(osm, "fetch_transit", write_transit)  # synthetic metro: two lines crossing at "Central"
     monkeypatch.setattr(config, "CACHE", tmp_path)  # never read or write the real data_cache
     monkeypatch.setattr(osm, "fetch_places", lambda bbox, path: path.write_text(json.dumps(OSM_PLACES), encoding="utf-8"))
     for k in ("OPENAQ_API_KEY", "FIRMS_MAP_KEY"):  # a developer's real keys must not send tests to the network

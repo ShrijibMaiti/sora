@@ -1,6 +1,6 @@
 import { useEffect, type FormEvent } from 'react';
-import { BUILDINGS, MODES, ROUTE, pareto, recOf, departed, routeColor, sgn, segs, toMin, hhmm, type BuildingKey, type PlanOk, type TripOption } from '../../data/sora';
-import { placeOf, useSora } from '../../state/store';
+import { BUILDINGS, MODES, POLL, ROUTE, pareto, recOf, departed, routeColor, sgn, segs, toMin, hhmm, type BuildingKey, type PlanOk, type TripOption } from '../../data/sora';
+import { placeOf, planPollutant, useSora } from '../../state/store';
 import { istDayStart, istHHMM, istMinutes } from '../../lib/time';
 import { Select } from '../Chrome';
 import { Icon } from '../Icon';
@@ -8,6 +8,8 @@ import { Disclaimer, Dl, Meter, PanelHeader, SubTabs } from './shared';
 
 export const placeName = (k: string) => (k === 'custom_here' ? 'Your location' : placeOf(k)?.name || (k.startsWith('custom_') ? 'Dropped pin' : 'Choose a place'));
 export const modeLabel = (k: string) => MODES.find((m) => m.k === k)?.label || '';
+/** " · planned for NO₂" when the plan isn't for PM2.5 (it follows the pollutant on the map). */
+export const pollNote = (st: Parameters<typeof planPollutant>[0]) => { const p = planPollutant(st); return p === 'pm25' ? '' : ` · planned for ${POLL.find((x) => x.k === p)!.label}`; };
 
 export function TripPanel() {
   const { st, set, setTrip, runPlan, selectOpt } = useSora();
@@ -31,7 +33,7 @@ export function TripPanel() {
     <div className="stack g32">
       <PanelHeader title={head.title} sub={head.sub}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
-          <p className="lede" style={{ flex: 1, minWidth: 200, fontSize: 'var(--fs-small)' }}>{ok ? `${placeName(trip.origin)} → ${placeName(trip.dest)} · ` : ''}{modeLabel(trip.mode)}, planned {trip.dep} IST · window ± {trip.win} min · up to {trip.maxExtra} extra min</p>
+          <p className="lede" style={{ flex: 1, minWidth: 200, fontSize: 'var(--fs-small)' }}>{ok ? `${placeName(trip.origin)} → ${placeName(trip.dest)} · ` : ''}{modeLabel(trip.mode)}, planned {trip.dep} IST · window ± {trip.win} min · up to {trip.maxExtra} extra min{pollNote(st)}</p>
           <button className="btn-outline" style={{ height: 40, padding: '0 16px' }} onClick={() => set((s) => ({ editTrip: !s.editTrip }))} aria-expanded={st.editTrip}>
             <Icon name={st.editTrip ? 'check' : 'sliders-horizontal'} size={14} />{st.editTrip ? 'Done' : 'Edit trip'}
           </button>

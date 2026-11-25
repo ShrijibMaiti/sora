@@ -1,7 +1,7 @@
 """Hourly 0–72 h PM2.5 field served by /api/field (spec §18, docs/api_contract.md).
 
 shortcut: CAMS background only (no station correction, no LUR downscaling) with a fixed log-normal
-error prior for p05/p95, so the field is labelled degradation L5 "CAMS only"; replace with the T0
+error prior for p05/p95, so the field is labelled degradation L3 (spec §39: fallback forecast); replace with the T0
 field model (spec §43: station ML + LUR + ensemble) once it exists.
 """
 import logging
@@ -90,7 +90,7 @@ def build(key: str, now: datetime) -> dict:
 
     r = lambda a, d=1: np.round(a, d).tolist()
     tt = [iso(t) for t in times[sl]]
-    # shown on the map, not assimilated: the field stays CAMS-only (coverage 0, degradation L5) until the T0 model
+    # shown on the map, not assimilated: the field stays CAMS-only (coverage 0, degradation L3) until the T0 model
     stations = _optional("OpenAQ stations", openaq.stations, city.bbox, now) or []
     fire_pts = _optional("FIRMS fires", fires.fetch, fires.region(city.bbox)) or []
     shared = {
@@ -100,7 +100,7 @@ def build(key: str, now: datetime) -> dict:
         "wind": {"dir_deg": r(to_deg), "speed_ms": np.round(np.nanmean(spd, 1), 2).tolist()},
         "meta": {
             "analysis_time": tt[0], "next_update": iso(t0 + timedelta(hours=1)), "built_at": iso(now),
-            "degradation": "L5", "n_stations": len(stations), "n_reporting": sum(s["reporting"] for s in stations),
+            "degradation": "L3", "n_stations": len(stations), "n_reporting": sum(s["reporting"] for s in stations),
             "background": "CAMS global forecast",
         },
     }

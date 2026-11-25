@@ -3,7 +3,7 @@
 #   docker run -p 8000:8000 -v sora-data:/data -e OPENAQ_API_KEY=... -e FIRMS_MAP_KEY=... sora
 # /data keeps the OSM road graph between restarts (first start downloads it, ~40 s for Delhi).
 
-FROM node:20-slim AS web
+FROM node:24-slim AS web
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci

@@ -21,7 +21,7 @@ def get(field: dict, n: int = config.N_SAMPLES, seed: int = 0) -> dict:
 
     Fixed seed: every option in every request is scored on the same samples (common random numbers).
     """
-    key = (field["city"], field["meta"]["built_at"], n, seed)
+    key = (field["city"], field.get("pollutant", "pm25"), field["meta"]["built_at"], n, seed)
     if key in _cache:
         return _cache[key]
     med = np.asarray(field["median"], float)

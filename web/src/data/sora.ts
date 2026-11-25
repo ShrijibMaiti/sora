@@ -196,7 +196,7 @@ export type PlanQuery = {
 };
 /** View model of an option: departure as IST "HH:MM" plus minutes-of-day; departure_iso is set when it came from the API. */
 /** Where an option's dose comes from (spec §22.4): indoor time, walking/waiting, named roads. */
-export type DoseSegment = { label: string; kind: 'indoor' | 'access' | 'road'; minutes: number; dose: number };
+export type DoseSegment = { label: string; kind: 'indoor' | 'access' | 'road' | 'transit'; minutes: number; dose: number };
 /** A departure × route on the Pareto front of travel time against risk-aware dose (spec §31.1). */
 export type FrontPoint = { departure: string; travel_min: number; extra_min: number; dose: Band; risk: number };
 export type TripOption = {
@@ -367,16 +367,20 @@ export const pareto = (res: PlanOk, W: number, H: number, pad = 28) => {
   return { pts, frontier, front, xLabel: 'Travel time (min)' };
 };
 
-export const DEGRADE = [
-  { l: 'L0', src: 'Stations + CAMS + satellite + street layer', conf: 'High', c: 'var(--success)' },
-  { l: 'L1', src: 'Stations + CAMS', conf: 'High', c: 'var(--success)' },
-  { l: 'L2', src: 'Stations + CAMS · some stations late', conf: 'Moderate', c: 'var(--warning)' },
-  { l: 'L3', src: 'Few stations + CAMS', conf: 'Moderate', c: 'var(--warning)' },
-  { l: 'L4', src: 'Stations only · no CAMS', conf: 'Moderate', c: 'var(--warning)' },
-  { l: 'L5', src: 'CAMS only', conf: 'Low', c: 'var(--danger)' },
-  { l: 'L6', src: 'Last analysis + climatology', conf: 'Low', c: 'var(--danger)' },
-  { l: 'L7', src: 'No current data', conf: 'Unavailable', c: 'var(--text-tertiary)' },
+/* Degradation levels exactly as spec §39 (the API's meta.degradation); OFFLINE is the app's own state, not a level. */
+export type Degrade = { l: string; src: string; conf: string; c: string };
+export const DEGRADE: Degrade[] = [
+  { l: 'L0', src: 'Full model, stations, street layer', conf: 'High', c: 'var(--success)' },
+  { l: 'L1', src: 'Full model, some stations missing', conf: 'High', c: 'var(--success)' },
+  { l: 'L2', src: 'Sparse data: coarser field, wider ranges', conf: 'Moderate', c: 'var(--warning)' },
+  { l: 'L3', src: 'Fallback: regional CAMS forecast', conf: 'Low', c: 'var(--warning)' },
+  { l: 'L4', src: 'No building info: generic indoor factors', conf: 'Moderate', c: 'var(--warning)' },
+  { l: 'L5', src: 'No GPS: schedule-based estimate', conf: 'Moderate', c: 'var(--warning)' },
+  { l: 'L6', src: 'No schedule: next hours only', conf: 'Low', c: 'var(--danger)' },
+  { l: 'L7', src: 'Routing down: departure advice only', conf: 'Low', c: 'var(--danger)' },
 ];
+export const OFFLINE: Degrade = { l: '—', src: 'No current data', conf: 'Unavailable', c: 'var(--text-tertiary)' };
+export const degradeOf = (level?: string) => DEGRADE.find((d) => d.l === level) ?? OFFLINE;
 
 export type HourBar = { h: number; parts: { me: MeKey; v: number; c: string }[]; tot: number };
 export const dayBars = (segs: DaySeg[], from: number, to: number): HourBar[] => {
